@@ -1,11 +1,15 @@
 // ==========================================
-// 1. CONFIGURACIÓN E INDEXEDDB
+// TABLA DE TERMISTORES 2.0 - APP.JS
+// Motor completo: IndexedDB, Steinhart-Hart, Interpolación, Clientes
 // ==========================================
+
 const DB_NAME = 'TermistoresDB';
 const DB_VERSION = 1;
-
 let db;
 
+// ==========================================
+// 1. INICIALIZACIÓN DE BASE DE DATOS
+// ==========================================
 const initDB = () => {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -30,7 +34,18 @@ const initDB = () => {
     });
 };
 
-// Tablas completas de termistores NTC Beta 3950
+// Generar tabla NTC usando ecuación Beta
+function generateNTCTable(R25, Beta) {
+    const table = [];
+    const T25 = 298.15;
+    for (let T = -40; T <= 150; T += 1) {
+        const TK = T + 273.15;
+        const R = R25 * Math.exp(Beta * (1/TK - 1/T25));
+        table.push({ t: T, r: Math.round(R * 1000) / 1000 });
+    }
+    return table;
+}
+
 const defaultTables = {
     'NTC 5K': generateNTCTable(5000, 3950),
     'NTC 10K': generateNTCTable(10000, 3950),
@@ -38,32 +53,15 @@ const defaultTables = {
     'NTC 20K': generateNTCTable(20000, 3950)
 };
 
-// Generar tabla NTC usando ecuación Beta
-function generateNTCTable(R25, Beta) {
-    const table = [];
-    const T25 = 298.15; // 25°C en Kelvin
-    const R0 = R25;
-    
-    for (let T = -50; T <= 150; T += 5) {
-        const TK = T + 273.15;
-        // Ecuación Beta: R = R25 * exp(Beta * (1/T - 1/T25))
-        const R = R0 * Math.exp(Beta * (1/TK - 1/T25));
-        table.push({ t: T, r: Math.round(R) });
-    }
-    return table;
-}
-
 const seedDefaultTables = () => {
-    const transaction = db.transaction(['tables'], 'readwrite');
-    const store = transaction.objectStore('tables');
+    const tx = db.transaction(['tables'], 'readwrite');
+    const store = tx.objectStore('tables');
     
     Object.keys(defaultTables).forEach(name => {
-        store.get(name).onsuccess = (event) => {
-            if (!event.target.result) {
-                store.add({
-                    name: name,
-                    data: defaultTables[name]
-                });
+        const checkReq = store.get(name);
+        checkReq.onsuccess = () => {
+            if (!checkReq.result) {
+                store.add({ name: name, data: defaultTables[name] });
             }
         };
     });
@@ -73,26 +71,26 @@ const seedDefaultTables = () => {
 // 2. MOTOR DE CÁLCULO
 // ==========================================
 const calcEngine = {
-    // Steinhart-Hart
     tempToRes: (tC, A, B, C) => {
         const T = tC + 273.15;
         let R = 10000;
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 10; i++) {
             const lnR = Math.log(R);
             const f = A + B * lnR + C * Math.pow(lnR, 3) - 1 / T;
             const df = B / R + 3 * C * Math.pow(lnR, 2) / R;
             R = R - f / df;
+            if (R <= 0) R = 0.001;
         }
         return R;
     },
     
     resToTemp: (R, A, B, C) => {
+        if (R <= 0) return -273.15;
         const lnR = Math.log(R);
         const T = 1 / (A + B * lnR + C * Math.pow(lnR, 3));
         return T - 273.15;
     },
     
-    // Interpolación lineal
     interpolate: (value, tableData, mode) => {
         const sorted = mode === 'R_to_T' 
             ? [...tableData].sort((a, b) => a.r - b.r)
@@ -102,7 +100,7 @@ const calcEngine = {
         const targetKey = mode === 'R_to_T' ? 't' : 'r';
 
         if (value < sorted[0][key] || value > sorted[sorted.length - 1][key]) {
-            return { error: 'Fuera de rango' };
+            return { error: 'Fuera de rango de la tabla' };
         }
 
         for (let i = 0; i < sorted.length - 1; i++) {
@@ -113,24 +111,33 @@ const calcEngine = {
                 return { value: result, error: null };
             }
         }
-        return { error: 'Error' };
+        return { error: 'No se pudo interpolar' };
     }
 };
 
 // ==========================================
-// 3. GESTIÓN DE UI
+// 3. ESTADO GLOBAL
 // ==========================================
 let currentMode = 'steinhart';
+let currentTable = null;
 
+// ==========================================
+// 4. INICIALIZACIÓN
+// ==========================================
 document.addEventListener('DOMContentLoaded', async () => {
     await initDB();
     setupNavigation();
     setupConverter();
     setupClients();
+    setupSearch();
     setupTables();
     loadTablesToSelect();
+    setupTheme();
 });
 
+// ==========================================
+// 5. NAVEGACIÓN
+// ==========================================
 function setupNavigation() {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -138,19 +145,72 @@ function setupNavigation() {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             btn.classList.add('active');
             document.getElementById(btn.dataset.view).classList.add('active');
-            
-            if (btn.dataset.view === 'view-clientes') renderClients();
-            if (btn.dataset.view === 'view-tablas') renderTables();
+            window.scrollTo(0, 0);
         });
-    });
-
-    document.getElementById('theme-toggle').addEventListener('click', () => {
-        const current = document.documentElement.getAttribute('data-theme');
-        document.documentElement.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
     });
 }
 
+function setupTheme() {
+    const toggle = document.getElementById('theme-toggle');
+    toggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const newTheme = current === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        toggle.textContent = newTheme === 'light' ? '🌙' : '☀️';
+    });
+}
+
+// ==========================================
+// 6. CONVERSOR
+// ==========================================
 function setupConverter() {
+    // Botones de acceso rápido
+    document.querySelectorAll('.quick-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const r = parseFloat(btn.dataset.r);
+            document.getElementById('input-res').value = (r / 1000).toFixed(3);
+            calculateFromRes();
+        });
+    });
+
+    // Slider de temperatura
+    const slider = document.getElementById('temp-slider');
+    const tempInput = document.getElementById('input-temp');
+    
+    slider.addEventListener('input', () => {
+        tempInput.value = parseFloat(slider.value).toFixed(1);
+        calculateFromTemp();
+    });
+
+    tempInput.addEventListener('input', () => {
+        const val = parseFloat(tempInput.value);
+        if (!isNaN(val)) {
+            slider.value = val;
+            calculateFromTemp();
+        }
+    });
+
+    document.getElementById('input-res').addEventListener('input', calculateFromRes);
+
+    // Botón limpiar
+    document.getElementById('btn-clear').addEventListener('click', () => {
+        tempInput.value = '25.0';
+        slider.value = 25;
+        document.getElementById('input-res').value = '10.000';
+        hideAlert();
+    });
+
+    // Botón invertir
+    document.getElementById('btn-invert').addEventListener('click', () => {
+        const temp = tempInput.value;
+        const res = document.getElementById('input-res').value;
+        tempInput.value = res;
+        document.getElementById('input-res').value = temp;
+    });
+
+    // Selector de modo
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -161,24 +221,11 @@ function setupConverter() {
             if (currentMode === 'interpolation') loadTablesToSelect();
         });
     });
-
-    // Botones rápidos de kΩ
-    document.querySelectorAll('.quick-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.getElementById('input-res').value = btn.dataset.r;
-            calculateFromRes();
-        });
-    });
-
-    document.getElementById('input-temp').addEventListener('input', calculateFromTemp);
-    document.getElementById('input-res').addEventListener('input', calculateFromRes);
 }
 
 function calculateFromTemp() {
     const tC = parseFloat(document.getElementById('input-temp').value);
-    const alertBox = document.getElementById('conversion-alert');
-    alertBox.classList.add('hidden');
-
+    hideAlert();
     if (isNaN(tC)) return;
 
     if (currentMode === 'steinhart') {
@@ -186,7 +233,7 @@ function calculateFromTemp() {
         const B = parseFloat(document.getElementById('sh-b').value);
         const C = parseFloat(document.getElementById('sh-c').value);
         const R = calcEngine.tempToRes(tC, A, B, C);
-        document.getElementById('input-res').value = R.toFixed(1);
+        document.getElementById('input-res').value = (R / 1000).toFixed(3);
     } else {
         const tableName = document.getElementById('lut-table-select').value;
         if (!tableName) return;
@@ -195,18 +242,17 @@ function calculateFromTemp() {
             if (res.error) {
                 showAlert(res.error, 'error');
             } else {
-                document.getElementById('input-res').value = res.value.toFixed(1);
+                document.getElementById('input-res').value = (res.value / 1000).toFixed(3);
             }
         });
     }
 }
 
 function calculateFromRes() {
-    const R = parseFloat(document.getElementById('input-res').value);
-    const alertBox = document.getElementById('conversion-alert');
-    alertBox.classList.add('hidden');
-
-    if (isNaN(R)) return;
+    const R_k = parseFloat(document.getElementById('input-res').value);
+    hideAlert();
+    if (isNaN(R_k)) return;
+    const R = R_k * 1000;
 
     if (currentMode === 'steinhart') {
         const A = parseFloat(document.getElementById('sh-a').value);
@@ -214,6 +260,7 @@ function calculateFromRes() {
         const C = parseFloat(document.getElementById('sh-c').value);
         const tC = calcEngine.resToTemp(R, A, B, C);
         document.getElementById('input-temp').value = tC.toFixed(1);
+        document.getElementById('temp-slider').value = tC;
     } else {
         const tableName = document.getElementById('lut-table-select').value;
         if (!tableName) return;
@@ -223,6 +270,7 @@ function calculateFromRes() {
                 showAlert(res.error, 'error');
             } else {
                 document.getElementById('input-temp').value = res.value.toFixed(1);
+                document.getElementById('temp-slider').value = res.value;
             }
         });
     }
@@ -230,140 +278,159 @@ function calculateFromRes() {
 
 function showAlert(msg, type) {
     const alertBox = document.getElementById('conversion-alert');
+    if (!alertBox) return;
     alertBox.textContent = msg;
     alertBox.className = `alert ${type}`;
-    alertBox.classList.remove('hidden');
+}
+
+function hideAlert() {
+    const alertBox = document.getElementById('conversion-alert');
+    if (alertBox) alertBox.className = 'alert hidden';
 }
 
 // ==========================================
-// 4. CLIENTES
+// 7. CLIENTES
 // ==========================================
 function setupClients() {
     document.getElementById('new-client-btn').addEventListener('click', () => {
-        document.getElementById('client-id').value = '';
-        document.getElementById('client-name').value = '';
-        document.getElementById('client-phone').value = '';
-        document.getElementById('client-address').value = '';
-        document.getElementById('client-modal').classList.remove('hidden');
+        clearClientForm();
     });
 
-    document.getElementById('cancel-client').addEventListener('click', () => {
-        document.getElementById('client-modal').classList.add('hidden');
+    document.getElementById('btn-save').addEventListener('click', saveClient);
+    document.getElementById('btn-delete').addEventListener('click', deleteCurrentClient);
+
+    // Toggle ON/OFF - INVERTER
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
     });
+}
 
-    document.getElementById('save-client').addEventListener('click', () => {
-        const id = document.getElementById('client-id').value;
-        const name = document.getElementById('client-name').value.trim();
-        const phone = document.getElementById('client-phone').value.trim();
-        const address = document.getElementById('client-address').value.trim();
+function clearClientForm() {
+    document.getElementById('client-name').value = '';
+    document.getElementById('client-phone').value = '';
+    document.getElementById('client-email').value = '';
+    document.getElementById('equipment-name').value = '';
+    document.getElementById('client-note').value = '';
+    document.getElementById('therm-int-1').value = '10.0';
+    document.getElementById('therm-int-1-temp').value = '25.0';
+    document.getElementById('therm-int-2').value = '15.0';
+    document.getElementById('therm-int-2-temp').value = '20.0';
+    document.getElementById('therm-ext-1').value = '5.0';
+    document.getElementById('therm-ext-1-temp').value = '30.0';
+    document.getElementById('therm-ext-2').value = '10.0';
+    document.getElementById('therm-ext-2-temp').value = '28.0';
+}
 
-        if (!name || !phone) {
-            alert('Nombre y Teléfono son obligatorios');
-            return;
-        }
+function saveClient() {
+    const name = document.getElementById('client-name').value.trim();
+    const phone = document.getElementById('client-phone').value.trim();
+    const email = document.getElementById('client-email').value.trim();
+    const equipment = document.getElementById('equipment-name').value.trim();
+    const note = document.getElementById('client-note').value.trim();
+    const equipmentType = document.querySelector('.toggle-btn.active')?.dataset.type || 'inverter';
+
+    if (!name || !phone) {
+        alert('Nombre y Teléfono son obligatorios');
+        return;
+    }
+
+    const clientData = {
+        name, phone, email, equipment, equipmentType, note,
+        thermistors: {
+            int1: { r: document.getElementById('therm-int-1').value, t: document.getElementById('therm-int-1-temp').value },
+            int2: { r: document.getElementById('therm-int-2').value, t: document.getElementById('therm-int-2-temp').value },
+            ext1: { r: document.getElementById('therm-ext-1').value, t: document.getElementById('therm-ext-1-temp').value },
+            ext2: { r: document.getElementById('therm-ext-2').value, t: document.getElementById('therm-ext-2-temp').value }
+        },
+        createdAt: new Date().toISOString()
+    };
+
+    const tx = db.transaction(['clients'], 'readwrite');
+    tx.objectStore('clients').add(clientData);
+    tx.oncomplete = () => {
+        alert('✅ Cliente guardado correctamente');
+        clearClientForm();
+    };
+    tx.onerror = () => alert('Error al guardar el cliente');
+}
+
+function deleteCurrentClient() {
+    if (confirm('¿Está seguro de eliminar este cliente? Esta acción no se puede deshacer.')) {
+        alert('Función de eliminación - implementar con ID de cliente');
+    }
+}
+
+// ==========================================
+// 8. BUSCADOR
+// ==========================================
+function setupSearch() {
+    const searchInput = document.getElementById('global-search');
+    const resultsContainer = document.getElementById('search-results');
+
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        resultsContainer.innerHTML = '';
+        
+        if (query.length < 2) return;
 
         const tx = db.transaction(['clients'], 'readonly');
-        const store = tx.objectStore('clients');
-        const request = store.getAll();
-        
-        request.onsuccess = () => {
-            const clients = request.result;
-            const duplicate = clients.find(c => 
-                c.name.toLowerCase() === name.toLowerCase() && c.phone === phone
+        tx.objectStore('clients').getAll().onsuccess = (ev) => {
+            const matches = ev.target.result.filter(c => 
+                c.name.toLowerCase().includes(query) || 
+                c.phone.includes(query) ||
+                (c.equipment && c.equipment.toLowerCase().includes(query))
             );
-            
-            if (duplicate && !id) {
-                alert('⚠️ Ya existe un cliente con este Nombre y Teléfono');
+
+            if (matches.length === 0) {
+                resultsContainer.innerHTML = '<p class="empty-state">No se encontraron resultados</p>';
                 return;
             }
 
-            const clientData = { name, phone, address };
-            if (id) clientData.id = parseInt(id);
-
-            const txWrite = db.transaction(['clients'], 'readwrite');
-            txWrite.objectStore('clients').put(clientData);
-            txWrite.oncomplete = () => {
-                document.getElementById('client-modal').classList.add('hidden');
-                renderClients();
-            };
+            matches.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.innerHTML = `
+                    <span class="result-icon">🔍</span>
+                    <div class="result-info">
+                        <strong>${c.name}</strong>
+                        <small>${c.phone} • ${c.equipment || 'Sin equipo'}</small>
+                    </div>
+                `;
+                div.addEventListener('click', () => loadClientToForm(c));
+                resultsContainer.appendChild(div);
+            });
         };
     });
 }
 
-function renderClients() {
-    const tx = db.transaction(['clients'], 'readonly');
-    const store = tx.objectStore('clients');
-    const request = store.getAll();
+function loadClientToForm(client) {
+    document.getElementById('client-name').value = client.name || '';
+    document.getElementById('client-phone').value = client.phone || '';
+    document.getElementById('client-email').value = client.email || '';
+    document.getElementById('equipment-name').value = client.equipment || '';
+    document.getElementById('client-note').value = client.note || '';
     
-    request.onsuccess = () => {
-        const container = document.getElementById('clients-list');
-        container.innerHTML = '';
-        request.result.forEach(c => {
-            const div = document.createElement('div');
-            div.className = 'card';
-            div.innerHTML = `
-                <div>
-                    <strong>${c.name}</strong><br>
-                    <small>${c.phone}</small><br>
-                    <small>${c.address || 'Sin dirección'}</small>
-                </div>
-                <div class="card-actions">
-                    <button class="secondary-btn" onclick="editClient(${c.id})">Editar</button>
-                    <button class="secondary-btn" style="color:var(--danger)" onclick="deleteClient(${c.id})">Borrar</button>
-                </div>
-            `;
-            container.appendChild(div);
-        });
-    };
+    if (client.thermistors) {
+        document.getElementById('therm-int-1').value = client.thermistors.int1?.r || '0.0';
+        document.getElementById('therm-int-1-temp').value = client.thermistors.int1?.t || '0.0';
+        document.getElementById('therm-int-2').value = client.thermistors.int2?.r || '0.0';
+        document.getElementById('therm-int-2-temp').value = client.thermistors.int2?.t || '0.0';
+        document.getElementById('therm-ext-1').value = client.thermistors.ext1?.r || '0.0';
+        document.getElementById('therm-ext-1-temp').value = client.thermistors.ext1?.t || '0.0';
+        document.getElementById('therm-ext-2').value = client.thermistors.ext2?.r || '0.0';
+        document.getElementById('therm-ext-2-temp').value = client.thermistors.ext2?.t || '0.0';
+    }
+
+    // Cambiar a vista de clientes
+    document.querySelector('[data-view="view-clientes"]').click();
 }
 
-window.editClient = (id) => {
-    const tx = db.transaction(['clients'], 'readonly');
-    tx.objectStore('clients').get(id).onsuccess = (e) => {
-        const c = e.target.result;
-        document.getElementById('client-id').value = c.id;
-        document.getElementById('client-name').value = c.name;
-        document.getElementById('client-phone').value = c.phone;
-        document.getElementById('client-address').value = c.address || '';
-        document.getElementById('client-modal').classList.remove('hidden');
-    };
-};
-
-window.deleteClient = (id) => {
-    if (confirm('¿Está seguro de eliminar este cliente?')) {
-        const tx = db.transaction(['clients'], 'readwrite');
-        tx.objectStore('clients').delete(id);
-        tx.oncomplete = () => renderClients();
-    }
-};
-
 // ==========================================
-// 5. BUSCADOR Y TABLAS
+// 9. TABLAS
 // ==========================================
-document.getElementById('global-search').addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase();
-    const container = document.getElementById('search-results');
-    container.innerHTML = '';
-    if (query.length < 2) return;
-
-    const tx = db.transaction(['clients'], 'readonly');
-    tx.objectStore('clients').getAll().onsuccess = (ev) => {
-        ev.target.result.filter(c => 
-            c.name.toLowerCase().includes(query) || 
-            c.phone.includes(query)
-        ).forEach(c => {
-            const div = document.createElement('div');
-            div.className = 'card';
-            div.innerHTML = `<div><strong>${c.name}</strong><br><small>${c.phone}</small></div>`;
-            div.onclick = () => {
-                document.querySelector('[data-view="view-clientes"]').click();
-                setTimeout(() => editClient(c.id), 100);
-            };
-            container.appendChild(div);
-        });
-    };
-});
-
 function setupTables() {
     document.getElementById('csv-upload').addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -373,20 +440,34 @@ function setupTables() {
             const lines = event.target.result.split('\n');
             const data = [];
             lines.forEach(line => {
-                const [r, t] = line.split(',').map(v => parseFloat(v.trim()));
-                if (!isNaN(r) && !isNaN(t)) data.push({ r, t });
+                const parts = line.split(',').map(v => parseFloat(v.trim()));
+                if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                    data.push({ r: parts[0], t: parts[1] });
+                }
             });
             if (data.length > 0) {
                 const tx = db.transaction(['tables'], 'readwrite');
                 tx.objectStore('tables').put({ name: file.name.replace('.csv', ''), data });
                 tx.oncomplete = () => {
-                    alert('Tabla importada');
+                    alert('✅ Tabla importada correctamente');
                     renderTables();
                     loadTablesToSelect();
                 };
             }
         };
         reader.readAsText(file);
+    });
+
+    // Click en items de tabla
+    document.querySelectorAll('.table-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const name = item.querySelector('h3').textContent;
+            getTable(name, (table) => {
+                if (table) {
+                    alert(`Tabla: ${table.name}\nPuntos: ${table.data.length}\nRango: ${table.data[0].t}°C a ${table.data[table.data.length-1].t}°C`);
+                }
+            });
+        });
     });
 }
 
@@ -397,8 +478,14 @@ function renderTables() {
         container.innerHTML = '';
         e.target.result.forEach(t => {
             const div = document.createElement('div');
-            div.className = 'card';
-            div.innerHTML = `<div><strong>${t.name}</strong><br><small>${t.data.length} puntos</small></div>`;
+            div.className = 'table-item';
+            div.innerHTML = `
+                <div class="table-info">
+                    <h3>${t.name}</h3>
+                    <p>Tabla completa -40°C a 150°C</p>
+                </div>
+                <button class="table-btn">›</button>
+            `;
             container.appendChild(div);
         });
     };
@@ -408,13 +495,18 @@ function loadTablesToSelect() {
     const tx = db.transaction(['tables'], 'readonly');
     tx.objectStore('tables').getAll().onsuccess = (e) => {
         const select = document.getElementById('lut-table-select');
-        select.innerHTML = '';
+        if (!select) return;
+        select.innerHTML = '<option value="">-- Seleccione una tabla --</option>';
         e.target.result.forEach(t => {
             const opt = document.createElement('option');
             opt.value = t.name;
             opt.textContent = t.name;
             select.appendChild(opt);
         });
+        if (e.target.result.length > 0) {
+            select.value = e.target.result[0].name;
+            currentTable = e.target.result[0];
+        }
     };
 }
 
