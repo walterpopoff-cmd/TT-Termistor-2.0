@@ -3,19 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#121212">
-    <meta name="description" content="Aplicación profesional offline para técnicos en refrigeración y aire acondicionado.">
+    <meta name="theme-color" content="#0a0e27">
+    <meta name="description" content="Aplicación profesional para técnicos en refrigeración y aire acondicionado">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Tabla de Termistores 2.0</title>
+    <title>TT - Termistores 2.0</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'></text></svg>">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- HEADER -->
     <header class="app-header">
-        <h1>🔧 Termistores 2.0</h1>
+        <div class="logo-container">
+            <div class="logo">TT</div>
+            <h1>CONVERSOR NTC</h1>
+        </div>
         <button id="theme-toggle" class="icon-btn" aria-label="Cambiar tema">☀️</button>
     </header>
 
@@ -27,21 +30,49 @@
         <!-- ============================================ -->
         <section id="view-inicio" class="view active">
             
-            <!-- Accesos Rápidos -->
+            <!-- Botones de Acceso Rápido -->
             <div class="quick-access">
-                <h3>Acceso Rápido (kΩ)</h3>
-                <div class="button-grid">
-                    <button class="quick-btn" data-r="5000">5K</button>
-                    <button class="quick-btn" data-r="10000">10K</button>
-                    <button class="quick-btn" data-r="15000">15K</button>
-                    <button class="quick-btn" data-r="20000">20K</button>
-                </div>
+                <button class="quick-btn" data-r="5000">5K</button>
+                <button class="quick-btn active" data-r="10000">10K</button>
+                <button class="quick-btn" data-r="15000">15K</button>
+                <button class="quick-btn" data-r="20000">20K</button>
             </div>
 
-            <!-- Conversor Bidireccional -->
-            <div class="converter-card">
-                <h3>Conversor Bidireccional</h3>
-                
+            <!-- Conversor Principal -->
+            <div class="converter-main">
+                <!-- Temperatura -->
+                <div class="input-section">
+                    <label>TEMPERATURA</label>
+                    <div class="value-display">
+                        <input type="number" id="input-temp" step="0.1" value="25.0" placeholder="0.0">
+                        <span class="unit">°C</span>
+                    </div>
+                    <div class="slider-container">
+                        <span class="slider-label">-40°C</span>
+                        <input type="range" id="temp-slider" min="-40" max="150" value="25" step="0.1">
+                        <span class="slider-label">150°C</span>
+                    </div>
+                </div>
+
+                <!-- Resistencia -->
+                <div class="input-section">
+                    <label>RESISTENCIA</label>
+                    <div class="value-display large">
+                        <input type="number" id="input-res" step="0.001" value="10.000" placeholder="0.000">
+                        <span class="unit">Ω</span>
+                    </div>
+                </div>
+
+                <!-- Botones de Acción -->
+                <div class="action-buttons">
+                    <button id="btn-clear" class="btn-secondary">
+                        <span class="icon">↺</span> LIMPIAR
+                    </button>
+                    <button id="btn-invert" class="btn-primary">
+                        <span class="icon">⇄</span> INVERTIR
+                    </button>
+                </div>
+
                 <!-- Selector de Modo -->
                 <div class="mode-selector">
                     <button class="mode-btn active" data-mode="steinhart">Steinhart-Hart</button>
@@ -50,19 +81,20 @@
 
                 <!-- Panel Steinhart-Hart -->
                 <div id="steinhart-panel" class="calc-panel active">
-                    <div class="input-group">
-                        <label>Coef. A</label>
-                        <input type="number" id="sh-a" step="any" value="1.129148e-3">
+                    <div class="coefficients-grid">
+                        <div class="input-group">
+                            <label>Coef. A</label>
+                            <input type="number" id="sh-a" step="any" value="1.129148e-3">
+                        </div>
+                        <div class="input-group">
+                            <label>Coef. B</label>
+                            <input type="number" id="sh-b" step="any" value="2.34125e-4">
+                        </div>
+                        <div class="input-group">
+                            <label>Coef. C</label>
+                            <input type="number" id="sh-c" step="any" value="8.76741e-8">
+                        </div>
                     </div>
-                    <div class="input-group">
-                        <label>Coef. B</label>
-                        <input type="number" id="sh-b" step="any" value="2.34125e-4">
-                    </div>
-                    <div class="input-group">
-                        <label>Coef. C</label>
-                        <input type="number" id="sh-c" step="any" value="8.76741e-8">
-                    </div>
-                    <button id="calc-sh-btn" class="action-btn">Calcular 3 Puntos (Auto)</button>
                 </div>
 
                 <!-- Panel Interpolación -->
@@ -73,24 +105,7 @@
                             <option value="">-- Seleccione una tabla --</option>
                         </select>
                     </div>
-                    <p class="hint">Cargue tablas en la sección "Tablas"</p>
                 </div>
-
-                <!-- Campos de Conversión -->
-                <div class="conversion-inputs">
-                    <div class="input-group">
-                        <label>Temperatura (°C)</label>
-                        <input type="number" id="input-temp" step="0.1" placeholder="Ej: 25">
-                    </div>
-                    <div class="swap-icon">⇅</div>
-                    <div class="input-group">
-                        <label>Resistencia (Ω)</label>
-                        <input type="number" id="input-res" step="0.1" placeholder="Ej: 10000">
-                    </div>
-                </div>
-                
-                <!-- Alertas -->
-                <div id="conversion-alert" class="alert hidden"></div>
             </div>
         </section>
 
@@ -98,33 +113,123 @@
         <!-- SECCIÓN: CLIENTES -->
         <!-- ============================================ -->
         <section id="view-clientes" class="view">
-            <h2>Clientes</h2>
-            <button id="new-client-btn" class="action-btn">+ Nuevo Cliente</button>
-            <div id="clients-list" class="list-container">
-                <p class="empty-state">No hay clientes registrados</p>
+            <div class="section-header">
+                <h2><span class="icon">👤</span> CLIENTES</h2>
+                <button id="new-client-btn" class="btn-edit">EDITAR</button>
             </div>
-            
-            <!-- Modal Cliente -->
-            <div id="client-modal" class="modal hidden">
-                <div class="modal-content">
-                    <h3>Datos del Cliente</h3>
-                    <input type="hidden" id="client-id">
-                    <div class="input-group">
-                        <label>Nombre *</label>
-                        <input type="text" id="client-name" placeholder="Nombre completo">
+
+            <div class="client-form">
+                <!-- Datos del Cliente -->
+                <div class="form-section">
+                    <h3>DATOS DEL CLIENTE</h3>
+                    <div class="form-group">
+                        <label><span class="icon"></span> NOMBRE</label>
+                        <input type="text" id="client-name" placeholder="Juan Pérez">
                     </div>
-                    <div class="input-group">
-                        <label>Teléfono *</label>
-                        <input type="tel" id="client-phone" placeholder="Teléfono de contacto">
+                    <div class="form-group">
+                        <label><span class="icon">📞</span> TELÉFONO</label>
+                        <input type="tel" id="client-phone" placeholder="+54 9 11 1234-5675">
                     </div>
-                    <div class="input-group">
-                        <label>Dirección</label>
-                        <input type="text" id="client-address" placeholder="Dirección (opcional)">
+                    <div class="form-group">
+                        <label><span class="icon">✉️</span> MAIL</label>
+                        <input type="email" id="client-email" placeholder="juan.perez@mail.com">
                     </div>
-                    <div class="modal-actions">
-                        <button id="cancel-client" class="secondary-btn">Cancelar</button>
-                        <button id="save-client" class="action-btn">Guardar</button>
+                </div>
+
+                <!-- Datos del Equipo -->
+                <div class="form-section">
+                    <h3>DATOS DEL EQUIPO</h3>
+                    <div class="form-group">
+                        <label><span class="icon">🔧</span> EQUIPO</label>
+                        <input type="text" id="equipment-name" placeholder="Aire Acondicionado Split">
                     </div>
+                    <div class="form-group">
+                        <label><span class="icon">⚙️</span> TIPO DE EQUIPO</label>
+                        <div class="toggle-group">
+                            <button class="toggle-btn" data-type="onoff">ON/OFF</button>
+                            <button class="toggle-btn active" data-type="inverter">INVERTER</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Termistores -->
+                <div class="form-section">
+                    <h3>TERMISTORES</h3>
+                    <div class="thermistors-grid">
+                        <div class="thermistor-card">
+                            <label><span class="icon">️</span> TERMISTOR INTERNO 1</label>
+                            <div class="thermistor-value">
+                                <input type="number" id="therm-int-1" step="0.1" value="10.0" placeholder="0.0">
+                                <span class="unit-small">kΩ</span>
+                            </div>
+                            <div class="thermistor-temp">
+                                <input type="number" id="therm-int-1-temp" step="0.1" value="25.0" placeholder="0.0">
+                                <span class="unit-small">°C</span>
+                            </div>
+                        </div>
+
+                        <div class="thermistor-card">
+                            <label><span class="icon">🌡️</span> TERMISTOR INTERNO 2</label>
+                            <div class="thermistor-value">
+                                <input type="number" id="therm-int-2" step="0.1" value="15.0" placeholder="0.0">
+                                <span class="unit-small">kΩ</span>
+                            </div>
+                            <div class="thermistor-temp">
+                                <input type="number" id="therm-int-2-temp" step="0.1" value="20.0" placeholder="0.0">
+                                <span class="unit-small">°C</span>
+                            </div>
+                        </div>
+
+                        <div class="thermistor-card">
+                            <label><span class="icon">️</span> TERMISTOR EXTERNO 1</label>
+                            <div class="thermistor-value">
+                                <input type="number" id="therm-ext-1" step="0.1" value="5.0" placeholder="0.0">
+                                <span class="unit-small">kΩ</span>
+                            </div>
+                            <div class="thermistor-temp">
+                                <input type="number" id="therm-ext-1-temp" step="0.1" value="30.0" placeholder="0.0">
+                                <span class="unit-small">°C</span>
+                            </div>
+                        </div>
+
+                        <div class="thermistor-card">
+                            <label><span class="icon">️</span> TERMISTOR EXTERNO 2</label>
+                            <div class="thermistor-value">
+                                <input type="number" id="therm-ext-2" step="0.1" value="10.0" placeholder="0.0">
+                                <span class="unit-small">kΩ</span>
+                            </div>
+                            <div class="thermistor-temp">
+                                <input type="number" id="therm-ext-2-temp" step="0.1" value="28.0" placeholder="0.0">
+                                <span class="unit-small">°C</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nota -->
+                <div class="form-section">
+                    <div class="form-group">
+                        <label><span class="icon">📝</span> NOTA</label>
+                        <textarea id="client-note" rows="3" placeholder="Revisión realizada el 22/05/2025. Se recomienda limpieza de filtros."></textarea>
+                    </div>
+                </div>
+
+                <!-- Alerta -->
+                <div class="alert-box">
+                    <span class="alert-icon">⚠️</span>
+                    <div class="alert-text">
+                        <strong>Nota:</strong> Ha asumido que un sensor de un equipo Inverter es igual a un On/Off. Ambos termistores deben mantenerse diferenciados. Permitir editar.
+                    </div>
+                </div>
+
+                <!-- Botones de Acción -->
+                <div class="form-actions">
+                    <button id="btn-delete" class="btn-danger">
+                        <span class="icon">🗑️</span> ELIMINAR
+                    </button>
+                    <button id="btn-save" class="btn-success">
+                        <span class="icon"></span> GUARDAR
+                    </button>
                 </div>
             </div>
         </section>
@@ -133,12 +238,61 @@
         <!-- SECCIÓN: BUSCAR -->
         <!-- ============================================ -->
         <section id="view-buscar" class="view">
-            <h2>Buscador</h2>
-            <div class="search-box">
-                <input type="text" id="global-search" placeholder="Nombre, teléfono o modelo...">
+            <div class="section-header">
+                <h2><span class="icon">🔍</span> BUSCADOR</h2>
             </div>
-            <div id="search-results" class="list-container">
-                <p class="empty-state">Escribe al menos 2 caracteres para buscar</p>
+
+            <div class="search-container">
+                <div class="search-box">
+                    <input type="text" id="global-search" placeholder="Buscar por marca...">
+                    <button class="search-btn">🔍</button>
+                </div>
+            </div>
+
+            <!-- Marcas Populares -->
+            <div class="popular-brands">
+                <h3>MARCAS POPULARES</h3>
+                <div class="brand-buttons">
+                    <button class="brand-btn">LG</button>
+                    <button class="brand-btn">Midea</button>
+                    <button class="brand-btn">BGH</button>
+                </div>
+                <button class="view-more">VER MÁS MARCAS</button>
+            </div>
+
+            <!-- Tipos de Equipo -->
+            <div class="equipment-types">
+                <h3>TIPOS DE EQUIPO</h3>
+                <div class="type-buttons">
+                    <button class="type-btn">Split</button>
+                    <button class="type-btn">Cassette</button>
+                    <button class="type-btn">Multi-Split</button>
+                </div>
+            </div>
+
+            <!-- Resultados -->
+            <div class="search-results" id="search-results">
+                <div class="result-item">
+                    <span class="result-icon">🔍</span>
+                    <div class="result-info">
+                        <strong>Samsung S4-W126</strong>
+                        <small>25/05/2025 10:30</small>
+                    </div>
+                </div>
+                <div class="result-item">
+                    <span class="result-icon">🔍</span>
+                    <div class="result-info">
+                        <strong>Midea 3000 Inverter</strong>
+                        <small>25/05/2025 09:50</small>
+                    </div>
+                </div>
+                <div class="result-item">
+                    <span class="result-icon">🔍</span>
+                    <div class="result-info">
+                        <strong>Midea 3000 Inverter</strong>
+                        <small>25/05/2025 09:50</small>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -146,38 +300,93 @@
         <!-- SECCIÓN: TABLAS -->
         <!-- ============================================ -->
         <section id="view-tablas" class="view">
-            <h2>Tablas de Termistores</h2>
+            <div class="section-header">
+                <h2><span class="icon">📊</span> TABLAS</h2>
+            </div>
+
+            <div class="tables-list" id="tables-list">
+                <div class="table-item">
+                    <div class="table-info">
+                        <h3>NTC 5K</h3>
+                        <p>Tabla completa -40°C a 150°C</p>
+                    </div>
+                    <button class="table-btn">›</button>
+                </div>
+
+                <div class="table-item">
+                    <div class="table-info">
+                        <h3>NTC 10K</h3>
+                        <p>Tabla completa -40°C a 150°C</p>
+                    </div>
+                    <button class="table-btn">›</button>
+                </div>
+
+                <div class="table-item">
+                    <div class="table-info">
+                        <h3>NTC 15K</h3>
+                        <p>Tabla completa -40°C a 150°C</p>
+                    </div>
+                    <button class="table-btn">›</button>
+                </div>
+
+                <div class="table-item">
+                    <div class="table-info">
+                        <h3>NTC 20K</h3>
+                        <p>Tabla completa -40°C a 150°C</p>
+                    </div>
+                    <button class="table-btn">›</button>
+                </div>
+            </div>
+
             <div class="upload-box">
-                <label class="action-btn">
+                <label class="btn-upload">
                     Importar CSV (R, T)
                     <input type="file" id="csv-upload" accept=".csv" class="hidden">
                 </label>
-                <p class="hint">Formato: Resistencia (Ω), Temperatura (°C)</p>
-            </div>
-            <div id="tables-list" class="list-container">
-                <p class="empty-state">No hay tablas disponibles</p>
             </div>
         </section>
 
     </main>
 
-    <!-- ============================================ -->
     <!-- BARRA DE NAVEGACIÓN INFERIOR -->
-    <!-- ============================================ -->
     <nav class="bottom-nav">
         <button class="nav-btn active" data-view="view-inicio">
-            🏠<span>Inicio</span>
+            <span class="nav-icon"></span>
+            <span class="nav-label">Inicio</span>
         </button>
         <button class="nav-btn" data-view="view-clientes">
-            👥<span>Clientes</span>
+            <span class="nav-icon">👥</span>
+            <span class="nav-label">Clientes</span>
         </button>
         <button class="nav-btn" data-view="view-buscar">
-            🔍<span>Buscar</span>
+            <span class="nav-icon">🔍</span>
+            <span class="nav-label">Buscador</span>
         </button>
         <button class="nav-btn" data-view="view-tablas">
-            📊<span>Tablas</span>
+            <span class="nav-icon"></span>
+            <span class="nav-label">Tablas</span>
         </button>
     </nav>
+
+    <!-- Modal Cliente -->
+    <div id="client-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Datos del Cliente</h3>
+            <input type="hidden" id="client-id">
+            <div class="input-group">
+                <label>Nombre *</label>
+                <input type="text" id="modal-client-name" placeholder="Nombre completo">
+            </div>
+            <div class="input-group">
+                <label>Teléfono *</label>
+                <input type="tel" id="modal-client-phone" placeholder="Teléfono de contacto">
+            </div>
+            <div class="modal-actions">
+                <button id="cancel-client" class="btn-secondary">Cancelar</button>
+                <button id="save-client" class="btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
 
     <!-- JavaScript -->
     <script src="app.js"></script>
