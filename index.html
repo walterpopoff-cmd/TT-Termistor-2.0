@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#121212">
+    <meta name="description" content="Aplicación profesional offline para técnicos en refrigeración y aire acondicionado.">
+    <title>Tabla de Termistores 2.0</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <h1>🔧 Termistores 2.0</h1>
+        <button id="theme-toggle" class="icon-btn" aria-label="Cambiar tema">☀️</button>
+    </header>
+
+    <main id="app-content">
+        <!-- SECCIÓN: INICIO / CONVERSOR -->
+        <section id="view-inicio" class="view active">
+            <div class="quick-access">
+                <h3>Acceso Rápido (kΩ)</h3>
+                <div class="button-grid">
+                    <button class="quick-btn" data-r="5000">5K</button>
+                    <button class="quick-btn" data-r="10000">10K</button>
+                    <button class="quick-btn" data-r="15000">15K</button>
+                    <button class="quick-btn" data-r="20000">20K</button>
+                </div>
+            </div>
+
+            <div class="converter-card">
+                <h3>Conversor Bidireccional</h3>
+                <div class="mode-selector">
+                    <button class="mode-btn active" data-mode="steinhart">Steinhart-Hart</button>
+                    <button class="mode-btn" data-mode="interpolation">Tabla (LUT)</button>
+                </div>
+
+                <!-- Modo Steinhart-Hart -->
+                <div id="steinhart-panel" class="calc-panel active">
+                    <div class="input-group">
+                        <label>Coef. A</label>
+                        <input type="number" id="sh-a" step="any" value="1.129148e-3">
+                    </div>
+                    <div class="input-group">
+                        <label>Coef. B</label>
+                        <input type="number" id="sh-b" step="any" value="2.34125e-4">
+                    </div>
+                    <div class="input-group">
+                        <label>Coef. C</label>
+                        <input type="number" id="sh-c" step="any" value="8.76741e-8">
+                    </div>
+                    <button id="calc-sh-btn" class="action-btn">Calcular 3 Puntos (Auto)</button>
+                </div>
+
+                <!-- Modo Interpolación -->
+                <div id="interpolation-panel" class="calc-panel">
+                    <div class="input-group">
+                        <label>Seleccionar Tabla</label>
+                        <select id="lut-table-select"></select>
+                    </div>
+                    <p class="hint">Cargue tablas en la sección "Tablas"</p>
+                </div>
+
+                <div class="conversion-inputs">
+                    <div class="input-group">
+                        <label>Temperatura (°C)</label>
+                        <input type="number" id="input-temp" step="0.1" placeholder="Ej: 25">
+                    </div>
+                    <div class="swap-icon">⇅</div>
+                    <div class="input-group">
+                        <label>Resistencia (Ω)</label>
+                        <input type="number" id="input-res" step="0.1" placeholder="Ej: 10000">
+                    </div>
+                </div>
+                <div id="conversion-alert" class="alert hidden"></div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN: CLIENTES -->
+        <section id="view-clientes" class="view">
+            <h2>Clientes</h2>
+            <button id="new-client-btn" class="action-btn">+ Nuevo Cliente</button>
+            <div id="clients-list" class="list-container"></div>
+            
+            <!-- Modal Cliente -->
+            <div id="client-modal" class="modal hidden">
+                <div class="modal-content">
+                    <h3>Datos del Cliente</h3>
+                    <input type="hidden" id="client-id">
+                    <div class="input-group"><label>Nombre</label><input type="text" id="client-name"></div>
+                    <div class="input-group"><label>Teléfono</label><input type="tel" id="client-phone"></div>
+                    <div class="input-group"><label>Dirección</label><input type="text" id="client-address"></div>
+                    <div class="modal-actions">
+                        <button id="cancel-client" class="secondary-btn">Cancelar</button>
+                        <button id="save-client" class="action-btn">Guardar</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN: BUSCAR -->
+        <section id="view-buscar" class="view">
+            <h2>Buscador</h2>
+            <div class="search-box">
+                <input type="text" id="global-search" placeholder="Nombre, teléfono o modelo...">
+            </div>
+            <div id="search-results" class="list-container"></div>
+        </section>
+
+        <!-- SECCIÓN: TABLAS -->
+        <section id="view-tablas" class="view">
+            <h2>Tablas de Termistores</h2>
+            <div class="upload-box">
+                <label class="action-btn">
+                    Importar CSV (R, T)
+                    <input type="file" id="csv-upload" accept=".csv" class="hidden">
+                </label>
+            </div>
+            <div id="tables-list" class="list-container"></div>
+        </section>
+    </main>
+
+    <!-- BARRA DE NAVEGACIÓN INFERIOR -->
+    <nav class="bottom-nav">
+        <button class="nav-btn active" data-view="view-inicio">🏠<span>Inicio</span></button>
+        <button class="nav-btn" data-view="view-clientes">👥<span>Clientes</span></button>
+        <button class="nav-btn" data-view="view-buscar">🔍<span>Buscar</span></button>
+        <button class="nav-btn" data-view="view-tablas">📊<span>Tablas</span></button>
+    </nav>
+
+    <script src="app.js"></script>
+</body>
+</html>
