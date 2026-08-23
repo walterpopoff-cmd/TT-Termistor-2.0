@@ -5,9 +5,11 @@ const DB_NAME = 'TermistoresDB';
 const DB_VERSION = 1;
 
 let db;
+
 const initDB = () => {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
+        
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
             if (!db.objectStoreNames.contains('clients')) {
@@ -17,50 +19,64 @@ const initDB = () => {
                 db.createObjectStore('tables', { keyPath: 'name' });
             }
         };
+        
         request.onsuccess = (event) => {
             db = event.target.result;
-            seedDefaultData();
+            seedDefaultTables();
             resolve(db);
         };
+        
         request.onerror = (event) => reject(event.target.error);
     });
 };
 
-const seedDefaultData = () => {
-    const transaction = db.transaction(['tables'], 'readonly');
+// Tablas completas de termistores NTC Beta 3950
+const defaultTables = {
+    'NTC 5K': generateNTCTable(5000, 3950),
+    'NTC 10K': generateNTCTable(10000, 3950),
+    'NTC 15K': generateNTCTable(15000, 3950),
+    'NTC 20K': generateNTCTable(20000, 3950)
+};
+
+// Generar tabla NTC usando ecuación Beta
+function generateNTCTable(R25, Beta) {
+    const table = [];
+    const T25 = 298.15; // 25°C en Kelvin
+    const R0 = R25;
+    
+    for (let T = -50; T <= 150; T += 5) {
+        const TK = T + 273.15;
+        // Ecuación Beta: R = R25 * exp(Beta * (1/T - 1/T25))
+        const R = R0 * Math.exp(Beta * (1/TK - 1/T25));
+        table.push({ t: T, r: Math.round(R) });
+    }
+    return table;
+}
+
+const seedDefaultTables = () => {
+    const transaction = db.transaction(['tables'], 'readwrite');
     const store = transaction.objectStore('tables');
-    const request = store.get('NTC 10K 3950');
-    request.onsuccess = () => {
-        if (!request.result) {
-            // Datos estándar de referencia NTC 10K Beta 3950 (No inventados, estándar industrial)
-            const defaultTable = {
-                name: 'NTC 10K 3950 (Estándar)',
-                data: [
-                    { t: 0, r: 32640 }, { t: 5, r: 25880 }, { t: 10, r: 20680 },
-                    { t: 15, r: 16650 }, { t: 20, r: 13500 }, { t: 25, r: 10000 },
-                    { t: 30, r: 8310 }, { t: 35, r: 6930 }, { t: 40, r: 5800 },
-                    { t: 45, r: 4870 }, { t: 50, r: 4110 }
-                ]
-            };
-            const tx = db.transaction(['tables'], 'readwrite');
-            tx.objectStore('tables').add(defaultTable);
-        }
-    };
+    
+    Object.keys(defaultTables).forEach(name => {
+        store.get(name).onsuccess = (event) => {
+            if (!event.target.result) {
+                store.add({
+                    name: name,
+                    data: defaultTables[name]
+                });
+            }
+        };
+    });
 };
 
 // ==========================================
 // 2. MOTOR DE CÁLCULO
 // ==========================================
 const calcEngine = {
-    // Steinhart-Hart: T en Kelvin
+    // Steinhart-Hart
     tempToRes: (tC, A, B, C) => {
         const T = tC + 273.15;
-        // Aproximación inversa numérica simple o usar Beta si no hay C. 
-        // Para bidireccional exacto con S-H, usamos Newton-Raphson o la fórmula directa si se despeja, 
-        // pero la forma más estable offline es iterativa o usar la ecuación directa R = exp(...) si se simplifica.
-        // Usaremos la aproximación estándar: 1/T = A + B*ln(R) + C*(ln(R))^3
-        // Despejar R analíticamente es complejo, usamos un solver numérico rápido:
-        let R = 10000; // Semilla
+        let R = 10000;
         for (let i = 0; i < 5; i++) {
             const lnR = Math.log(R);
             const f = A + B * lnR + C * Math.pow(lnR, 3) - 1 / T;
@@ -69,13 +85,15 @@ const calcEngine = {
         }
         return R;
     },
+    
     resToTemp: (R, A, B, C) => {
         const lnR = Math.log(R);
         const T = 1 / (A + B * lnR + C * Math.pow(lnR, 3));
         return T - 273.15;
     },
+    
+    // Interpolación lineal
     interpolate: (value, tableData, mode) => {
-        // mode: 'R_to_T' o 'T_to_R'
         const sorted = mode === 'R_to_T' 
             ? [...tableData].sort((a, b) => a.r - b.r)
             : [...tableData].sort((a, b) => a.t - b.t);
@@ -84,7 +102,7 @@ const calcEngine = {
         const targetKey = mode === 'R_to_T' ? 't' : 'r';
 
         if (value < sorted[0][key] || value > sorted[sorted.length - 1][key]) {
-            return { error: 'Fuera de rango de la tabla' };
+            return { error: 'Fuera de rango' };
         }
 
         for (let i = 0; i < sorted.length - 1; i++) {
@@ -95,15 +113,14 @@ const calcEngine = {
                 return { value: result, error: null };
             }
         }
-        return { error: 'No se pudo interpolar' };
+        return { error: 'Error' };
     }
 };
 
 // ==========================================
-// 3. GESTIÓN DE UI Y EVENTOS
+// 3. GESTIÓN DE UI
 // ==========================================
 let currentMode = 'steinhart';
-let currentTable = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     await initDB();
@@ -121,6 +138,7 @@ function setupNavigation() {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             btn.classList.add('active');
             document.getElementById(btn.dataset.view).classList.add('active');
+            
             if (btn.dataset.view === 'view-clientes') renderClients();
             if (btn.dataset.view === 'view-tablas') renderTables();
         });
@@ -144,6 +162,7 @@ function setupConverter() {
         });
     });
 
+    // Botones rápidos de kΩ
     document.querySelectorAll('.quick-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.getElementById('input-res').value = btn.dataset.r;
@@ -174,9 +193,7 @@ function calculateFromTemp() {
         getTable(tableName, (table) => {
             const res = calcEngine.interpolate(tC, table.data, 'T_to_R');
             if (res.error) {
-                alertBox.textContent = res.error;
-                alertBox.className = 'alert error';
-                alertBox.classList.remove('hidden');
+                showAlert(res.error, 'error');
             } else {
                 document.getElementById('input-res').value = res.value.toFixed(1);
             }
@@ -203,9 +220,7 @@ function calculateFromRes() {
         getTable(tableName, (table) => {
             const res = calcEngine.interpolate(R, table.data, 'R_to_T');
             if (res.error) {
-                alertBox.textContent = res.error;
-                alertBox.className = 'alert error';
-                alertBox.classList.remove('hidden');
+                showAlert(res.error, 'error');
             } else {
                 document.getElementById('input-temp').value = res.value.toFixed(1);
             }
@@ -213,8 +228,15 @@ function calculateFromRes() {
     }
 }
 
+function showAlert(msg, type) {
+    const alertBox = document.getElementById('conversion-alert');
+    alertBox.textContent = msg;
+    alertBox.className = `alert ${type}`;
+    alertBox.classList.remove('hidden');
+}
+
 // ==========================================
-// 4. GESTIÓN DE CLIENTES (SIN DUPLICADOS AUTO)
+// 4. CLIENTES
 // ==========================================
 function setupClients() {
     document.getElementById('new-client-btn').addEventListener('click', () => {
@@ -246,10 +268,12 @@ function setupClients() {
         
         request.onsuccess = () => {
             const clients = request.result;
-            const duplicate = clients.find(c => c.name.toLowerCase() === name.toLowerCase() && c.phone === phone);
+            const duplicate = clients.find(c => 
+                c.name.toLowerCase() === name.toLowerCase() && c.phone === phone
+            );
             
             if (duplicate && !id) {
-                alert('⚠️ Ya existe un cliente con este Nombre y Teléfono. No se fusionará automáticamente. Modifique los datos o cancele.');
+                alert('⚠️ Ya existe un cliente con este Nombre y Teléfono');
                 return;
             }
 
@@ -270,6 +294,7 @@ function renderClients() {
     const tx = db.transaction(['clients'], 'readonly');
     const store = tx.objectStore('clients');
     const request = store.getAll();
+    
     request.onsuccess = () => {
         const container = document.getElementById('clients-list');
         container.innerHTML = '';
@@ -305,7 +330,7 @@ window.editClient = (id) => {
 };
 
 window.deleteClient = (id) => {
-    if (confirm('¿Está seguro de eliminar este cliente? Esta acción no se puede deshacer.')) {
+    if (confirm('¿Está seguro de eliminar este cliente?')) {
         const tx = db.transaction(['clients'], 'readwrite');
         tx.objectStore('clients').delete(id);
         tx.oncomplete = () => renderClients();
@@ -355,7 +380,7 @@ function setupTables() {
                 const tx = db.transaction(['tables'], 'readwrite');
                 tx.objectStore('tables').put({ name: file.name.replace('.csv', ''), data });
                 tx.oncomplete = () => {
-                    alert('Tabla importada correctamente');
+                    alert('Tabla importada');
                     renderTables();
                     loadTablesToSelect();
                 };
@@ -390,7 +415,6 @@ function loadTablesToSelect() {
             opt.textContent = t.name;
             select.appendChild(opt);
         });
-        if (e.target.result.length > 0) currentTable = e.target.result[0];
     };
 }
 
