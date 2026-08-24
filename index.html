@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0a0e27">
-    <meta name="description" content="Aplicación profesional para técnicos en refrigeración y aire acondicionado">
+    <meta name="description" content="Aplicación profesional offline para técnicos en refrigeración y aire acondicionado">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>TT - Termistores 2.0</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'></text></svg>">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -83,15 +83,15 @@
                 <div id="steinhart-panel" class="calc-panel active">
                     <div class="coefficients-grid">
                         <div class="input-group">
-                            <label>Coef. A</label>
+                            <label>COEF. A</label>
                             <input type="number" id="sh-a" step="any" value="1.129148e-3">
                         </div>
                         <div class="input-group">
-                            <label>Coef. B</label>
+                            <label>COEF. B</label>
                             <input type="number" id="sh-b" step="any" value="2.34125e-4">
                         </div>
                         <div class="input-group">
-                            <label>Coef. C</label>
+                            <label>COEF. C</label>
                             <input type="number" id="sh-c" step="any" value="8.76741e-8">
                         </div>
                     </div>
@@ -106,6 +106,9 @@
                         </select>
                     </div>
                 </div>
+
+                <!-- Alertas -->
+                <div id="conversion-alert" class="alert hidden"></div>
             </div>
         </section>
 
@@ -123,11 +126,11 @@
                 <div class="form-section">
                     <h3>DATOS DEL CLIENTE</h3>
                     <div class="form-group">
-                        <label><span class="icon"></span> NOMBRE</label>
+                        <label><span class="icon">👤</span> NOMBRE</label>
                         <input type="text" id="client-name" placeholder="Juan Pérez">
                     </div>
                     <div class="form-group">
-                        <label><span class="icon">📞</span> TELÉFONO</label>
+                        <label><span class="icon"></span> TELÉFONO</label>
                         <input type="tel" id="client-phone" placeholder="+54 9 11 1234-5675">
                     </div>
                     <div class="form-group">
@@ -157,7 +160,7 @@
                     <h3>TERMISTORES</h3>
                     <div class="thermistors-grid">
                         <div class="thermistor-card">
-                            <label><span class="icon">️</span> TERMISTOR INTERNO 1</label>
+                            <label><span class="icon">🌡️</span> TERMISTOR INTERNO 1</label>
                             <div class="thermistor-value">
                                 <input type="number" id="therm-int-1" step="0.1" value="10.0" placeholder="0.0">
                                 <span class="unit-small">kΩ</span>
@@ -181,7 +184,7 @@
                         </div>
 
                         <div class="thermistor-card">
-                            <label><span class="icon">️</span> TERMISTOR EXTERNO 1</label>
+                            <label><span class="icon">🌡️</span> TERMISTOR EXTERNO 1</label>
                             <div class="thermistor-value">
                                 <input type="number" id="therm-ext-1" step="0.1" value="5.0" placeholder="0.0">
                                 <span class="unit-small">kΩ</span>
@@ -193,7 +196,7 @@
                         </div>
 
                         <div class="thermistor-card">
-                            <label><span class="icon">️</span> TERMISTOR EXTERNO 2</label>
+                            <label><span class="icon">🌡️</span> TERMISTOR EXTERNO 2</label>
                             <div class="thermistor-value">
                                 <input type="number" id="therm-ext-2" step="0.1" value="10.0" placeholder="0.0">
                                 <span class="unit-small">kΩ</span>
@@ -228,7 +231,7 @@
                         <span class="icon">🗑️</span> ELIMINAR
                     </button>
                     <button id="btn-save" class="btn-success">
-                        <span class="icon"></span> GUARDAR
+                        <span class="icon">💾</span> GUARDAR
                     </button>
                 </div>
             </div>
@@ -244,7 +247,7 @@
 
             <div class="search-container">
                 <div class="search-box">
-                    <input type="text" id="global-search" placeholder="Buscar por marca...">
+                    <input type="text" id="global-search" placeholder="Buscar por nombre, teléfono o email...">
                     <button class="search-btn">🔍</button>
                 </div>
             </div>
@@ -272,27 +275,7 @@
 
             <!-- Resultados -->
             <div class="search-results" id="search-results">
-                <div class="result-item">
-                    <span class="result-icon">🔍</span>
-                    <div class="result-info">
-                        <strong>Samsung S4-W126</strong>
-                        <small>25/05/2025 10:30</small>
-                    </div>
-                </div>
-                <div class="result-item">
-                    <span class="result-icon">🔍</span>
-                    <div class="result-info">
-                        <strong>Midea 3000 Inverter</strong>
-                        <small>25/05/2025 09:50</small>
-                    </div>
-                </div>
-                <div class="result-item">
-                    <span class="result-icon">🔍</span>
-                    <div class="result-info">
-                        <strong>Midea 3000 Inverter</strong>
-                        <small>25/05/2025 09:50</small>
-                    </div>
-                </div>
+                <p class="empty-state">Escribe al menos 2 caracteres para buscar</p>
             </div>
         </section>
 
@@ -351,7 +334,7 @@
     <!-- BARRA DE NAVEGACIÓN INFERIOR -->
     <nav class="bottom-nav">
         <button class="nav-btn active" data-view="view-inicio">
-            <span class="nav-icon"></span>
+            <span class="nav-icon">🏠</span>
             <span class="nav-label">Inicio</span>
         </button>
         <button class="nav-btn" data-view="view-clientes">
@@ -359,34 +342,14 @@
             <span class="nav-label">Clientes</span>
         </button>
         <button class="nav-btn" data-view="view-buscar">
-            <span class="nav-icon">🔍</span>
+            <span class="nav-icon"></span>
             <span class="nav-label">Buscador</span>
         </button>
         <button class="nav-btn" data-view="view-tablas">
-            <span class="nav-icon"></span>
+            <span class="nav-icon">📊</span>
             <span class="nav-label">Tablas</span>
         </button>
     </nav>
-
-    <!-- Modal Cliente -->
-    <div id="client-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3>Datos del Cliente</h3>
-            <input type="hidden" id="client-id">
-            <div class="input-group">
-                <label>Nombre *</label>
-                <input type="text" id="modal-client-name" placeholder="Nombre completo">
-            </div>
-            <div class="input-group">
-                <label>Teléfono *</label>
-                <input type="tel" id="modal-client-phone" placeholder="Teléfono de contacto">
-            </div>
-            <div class="modal-actions">
-                <button id="cancel-client" class="btn-secondary">Cancelar</button>
-                <button id="save-client" class="btn-primary">Guardar</button>
-            </div>
-        </div>
-    </div>
 
     <!-- JavaScript -->
     <script src="app.js"></script>
