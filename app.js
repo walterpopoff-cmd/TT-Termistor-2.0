@@ -1,44 +1,81 @@
 // ==========================================
 // TABLA DE TERMISTORES 2.0 - APP.JS
-// Motor completo: IndexedDB, Steinhart-Hart, Interpolación, Clientes, Buscador
 // ==========================================
 
 const DB_NAME = 'TermistoresDB';
 const DB_VERSION = 1;
-let db;
-let currentEditingClientId = null;
+let db = null;
+let currentR25 = 10000; // Valor nominal actual
+let currentMode = 'steinhart';
 
 // ==========================================
-// 1. INICIALIZACIÓN DE BASE DE DATOS
+// 1. INICIALIZACIÓN
 // ==========================================
-const initDB = () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await initDB();
+        setupNavigation();
+        setupConverter();
+        setupClients();
+        setupSearch();
+        setupTables();
+        await loadTablesToSelect();
+        setupTheme();
+        
+        // Seleccionar 10K por defecto
+        setTimeout(() => {
+            const btn10K = document.querySelector('.quick-btn[data-r="10000"]');
+            if (btn10K) btn10K.click();
+        }, 200);
+        
+        console.log('✅ Aplicación inicializada correctamente');
+    } catch (error) {
+        console.error('❌ Error en inicialización:', error);
+    }
+});
+
+// ==========================================
+// 2. BASE DE DATOS INDEXEDDB
+// ==========================================
+function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains('clients')) {
-                db.createObjectStore('clients', { keyPath: 'id', autoIncrement: true });
-            }
-            if (!db.objectStoreNames.contains('tables')) {
-                db.createObjectStore('tables', { keyPath: 'name' });
-            }
+        request.onerror = () => {
+            console.error('Error al abrir BD:', request.error);
+            reject(request.error);
         };
         
-        request.onsuccess = (event) => {
-            db = event.target.result;
+        request.onsuccess = () => {
+            db = request.result;
+            console.log('✅ BD abierta correctamente');
             seedDefaultTables();
             resolve(db);
         };
         
-        request.onerror = (event) => reject(event.target.error);
+        request.onupgradeneeded = (event) => {
+            const database = event.target.result;
+            
+            if (!database.objectStoreNames.contains('clients')) {
+                database.createObjectStore('clients', { keyPath: 'id', autoIncrement: true });
+                console.log('📦 Store clients creado');
+            }
+            
+            if (!database.objectStoreNames.contains('tables')) {
+                database.createObjectStore('tables', { keyPath: 'name' });
+                console.log('📦 Store tables creado');
+            }
+        };
     });
-};
+}
 
-// Generar tabla NTC usando ecuación Beta
+// ==========================================
+// 3. TABLAS POR DEFECTO
+// ==========================================
 function generateNTCTable(R25, Beta) {
     const table = [];
     const T25 = 298.15;
+    
     for (let T = -40; T <= 150; T += 1) {
         const TK = T + 273.15;
         const R = R25 * Math.exp(Beta * (1/TK - 1/T25));
@@ -54,33 +91,71 @@ const defaultTables = {
     'NTC 20K': generateNTCTable(20000, 3950)
 };
 
-const seedDefaultTables = () => {
+function seedDefaultTables() {
+    if (!db) return;
+    
     const tx = db.transaction(['tables'], 'readwrite');
     const store = tx.objectStore('tables');
     
     Object.keys(defaultTables).forEach(name => {
-        const checkReq = store.get(name);
-        checkReq.onsuccess = () => {
-            if (!checkReq.result) {
-                store.add({ name: name, data: defaultTables[name] });
+        const getRequest = store.get(name);
+        getRequest.onsuccess = () => {
+            if (!getRequest.result) {
+                store.add({
+                    name: name,
+                    data: defaultTables[name]
+                });
+                console.log(`📊 Tabla ${name} creada`);
             }
         };
     });
-};
+}
 
 // ==========================================
-// 2. MOTOR DE CÁLCULO
+// 4. MOTOR DE CÁLCULO
 // ==========================================
 const calcEngine = {
+    calculateCoefficients: (T1, R1, T2, R2, T3, R3) => {
+        const L1 = Math.log(R1);
+        const L2 = Math.log(R2);
+        const L3 = Math.log(R3);
+        const Y1 = 1 / (T1 + 273.15);
+        const Y2 = 1 / (T2 + 273.15);
+        const Y3 = 1 / (T3 + 273.15);
+        
+        const A = (L2 * L3 * (L2 - L3) * Y1 + 
+                   L3 * L1 * (L3 - L1) * Y2 + 
+                   L1 * L2 * (L1 - L2) * Y3) / 
+                  ((L1 - L3) * (L1 - L2) * (L2 - L3));
+        
+        const B = ((L2 - L3) * Y1 + 
+                   (L3 - L1) * Y2 + 
+                   (L1 - L2) * Y3) / 
+                  ((L1 - L3) * (L1 - L2) * (L2 - L3));
+        
+        const C = ((L3 - L2) * Y1 + 
+                   (L1 - L3) * Y2 + 
+                   (L2 - L1) * Y3) / 
+                  ((L1 - L3) * (L1 - L2) * (L2 - L3));
+        
+        return { A, B, C };
+    },
+    
     tempToRes: (tC, A, B, C) => {
         const T = tC + 273.15;
-        let R = 10000;
-        for (let i = 0; i < 10; i++) {
+        const Y = 1 / T;
+        let R = currentR25;
+        
+        for (let i = 0; i < 20; i++) {
             const lnR = Math.log(R);
-            const f = A + B * lnR + C * Math.pow(lnR, 3) - 1 / T;
-            const df = B / R + 3 * C * Math.pow(lnR, 2) / R;
-            R = R - f / df;
-            if (R <= 0) R = 0.001;
+            const f = A + B * lnR + C * Math.pow(lnR, 3) - Y;
+            const df = (B + 3 * C * lnR * lnR) / R;
+            
+            if (Math.abs(df) < 1e-15) break;
+            
+            const Rnew = R - f / df;
+            if (Math.abs(Rnew - R) < 0.001) break;
+            R = Math.max(Rnew, 0.001);
         }
         return R;
     },
@@ -88,11 +163,17 @@ const calcEngine = {
     resToTemp: (R, A, B, C) => {
         if (R <= 0) return -273.15;
         const lnR = Math.log(R);
-        const T = 1 / (A + B * lnR + C * Math.pow(lnR, 3));
+        const invT = A + B * lnR + C * Math.pow(lnR, 3);
+        if (Math.abs(invT) < 1e-15) return -273.15;
+        const T = 1 / invT;
         return T - 273.15;
     },
     
     interpolate: (value, tableData, mode) => {
+        if (!tableData || tableData.length === 0) {
+            return { error: 'Tabla vacía', value: null };
+        }
+        
         const sorted = mode === 'R_to_T' 
             ? [...tableData].sort((a, b) => a.r - b.r)
             : [...tableData].sort((a, b) => a.t - b.t);
@@ -100,52 +181,46 @@ const calcEngine = {
         const key = mode === 'R_to_T' ? 'r' : 't';
         const targetKey = mode === 'R_to_T' ? 't' : 'r';
 
-        if (value < sorted[0][key] || value > sorted[sorted.length - 1][key]) {
-            return { error: 'Fuera de rango de la tabla' };
+        if (value < sorted[0][key]) {
+            return { error: `Mín: ${sorted[0][key].toFixed(1)}`, value: null };
+        }
+        if (value > sorted[sorted.length - 1][key]) {
+            return { error: `Máx: ${sorted[sorted.length - 1][key].toFixed(1)}`, value: null };
         }
 
         for (let i = 0; i < sorted.length - 1; i++) {
             if (value >= sorted[i][key] && value <= sorted[i + 1][key]) {
-                const x1 = sorted[i][key], x2 = sorted[i + 1][key];
-                const y1 = sorted[i][targetKey], y2 = sorted[i + 1][targetKey];
+                const x1 = sorted[i][key];
+                const x2 = sorted[i + 1][key];
+                const y1 = sorted[i][targetKey];
+                const y2 = sorted[i + 1][targetKey];
+                
+                if (Math.abs(x2 - x1) < 1e-10) {
+                    return { error: null, value: y1 };
+                }
+                
                 const result = y1 + (value - x1) * (y2 - y1) / (x2 - x1);
-                return { value: result, error: null };
+                return { error: null, value: result };
             }
         }
-        return { error: 'No se pudo interpolar' };
+        
+        return { error: 'No interpolable', value: null };
     }
 };
-
-// ==========================================
-// 3. ESTADO GLOBAL
-// ==========================================
-let currentMode = 'steinhart';
-let currentTable = null;
-
-// ==========================================
-// 4. INICIALIZACIÓN
-// ==========================================
-document.addEventListener('DOMContentLoaded', async () => {
-    await initDB();
-    setupNavigation();
-    setupConverter();
-    setupClients();
-    setupSearch();
-    setupTables();
-    loadTablesToSelect();
-    setupTheme();
-});
 
 // ==========================================
 // 5. NAVEGACIÓN
 // ==========================================
 function setupNavigation() {
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    const navBtns = document.querySelectorAll('.nav-btn');
+    navBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            navBtns.forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(btn.dataset.view).classList.add('active');
+            
+            this.classList.add('active');
+            const viewId = this.getAttribute('data-view');
+            document.getElementById(viewId).classList.add('active');
             window.scrollTo(0, 0);
         });
     });
@@ -153,6 +228,8 @@ function setupNavigation() {
 
 function setupTheme() {
     const toggle = document.getElementById('theme-toggle');
+    if (!toggle) return;
+    
     toggle.addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme');
         const newTheme = current === 'light' ? 'dark' : 'light';
@@ -162,145 +239,117 @@ function setupTheme() {
 }
 
 // ==========================================
-// 6. CONVERSOR
+// 6. CONVERSOR - CORREGIDO
 // ==========================================
 function setupConverter() {
-    // Botones de acceso rápido (5K, 10K, 15K, 20K)
-    document.querySelectorAll('.quick-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+    // Botones de acceso rápido
+    const quickBtns = document.querySelectorAll('.quick-btn');
+    quickBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            quickBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
             
-            const rNominal = parseFloat(btn.dataset.r); // 5000, 10000, 15000, 20000
+            const rNominal = parseFloat(this.getAttribute('data-r'));
             currentR25 = rNominal;
             
-            // Establecer temperatura en 25°C
             const tempInput = document.getElementById('input-temp');
             const slider = document.getElementById('temp-slider');
+            const resInput = document.getElementById('input-res');
+            
             tempInput.value = '25.0';
             slider.value = 25;
-            
-            // Establecer resistencia en el valor nominal (en kΩ)
-            const resInput = document.getElementById('input-res');
             resInput.value = (rNominal / 1000).toFixed(3);
             
-            // Actualizar coeficientes Steinhart-Hart según el valor nominal
             updateCoefficientsForR25(rNominal);
-            
             hideAlert();
+            
+            console.log(`✅ Seleccionado: ${rNominal/1000}K @ 25°C`);
         });
     });
 
-    // Slider de temperatura
+    // Slider
     const slider = document.getElementById('temp-slider');
     const tempInput = document.getElementById('input-temp');
     
-    slider.addEventListener('input', () => {
-        const val = parseFloat(slider.value);
-        if (!isNaN(val)) {
-            tempInput.value = val.toFixed(1);
-            calculateFromTemp();
-        }
-    });
-
-    tempInput.addEventListener('input', () => {
-        const val = parseFloat(tempInput.value);
-        if (!isNaN(val)) {
-            // Actualizar slider solo si está en rango
-            if (val >= -40 && val <= 150) {
-                slider.value = val;
+    if (slider) {
+        slider.addEventListener('input', function() {
+            const val = parseFloat(this.value);
+            if (!isNaN(val) && tempInput) {
+                tempInput.value = val.toFixed(1);
+                calculateFromTemp();
             }
-            calculateFromTemp();
-        }
-    });
+        });
+    }
 
-    document.getElementById('input-res').addEventListener('input', calculateFromRes);
+    // Input temperatura
+    if (tempInput) {
+        tempInput.addEventListener('input', function() {
+            const val = parseFloat(this.value);
+            if (!isNaN(val) && slider) {
+                if (val >= -40 && val <= 150) {
+                    slider.value = val;
+                }
+                calculateFromTemp();
+            }
+        });
+    }
+
+    // Input resistencia
+    const resInput = document.getElementById('input-res');
+    if (resInput) {
+        resInput.addEventListener('input', function() {
+            calculateFromRes();
+        });
+    }
 
     // Botón limpiar
-    document.getElementById('btn-clear').addEventListener('click', () => {
-        const tempInput = document.getElementById('input-temp');
-        const slider = document.getElementById('temp-slider');
-        const resInput = document.getElementById('input-res');
-        
-        tempInput.value = '25.0';
-        slider.value = 25;
-        resInput.value = (currentR25 / 1000).toFixed(3);
-        hideAlert();
-    });
+    const clearBtn = document.getElementById('btn-clear');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            if (tempInput) tempInput.value = '25.0';
+            if (slider) slider.value = 25;
+            if (resInput) resInput.value = (currentR25 / 1000).toFixed(3);
+            hideAlert();
+        });
+    }
 
     // Selector de modo
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    const modeBtns = document.querySelectorAll('.mode-btn');
+    modeBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            modeBtns.forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.calc-panel').forEach(p => p.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(btn.dataset.mode + '-panel').classList.add('active');
-            currentMode = btn.dataset.mode;
+            
+            this.classList.add('active');
+            const mode = this.getAttribute('data-mode');
+            document.getElementById(mode + '-panel').classList.add('active');
+            currentMode = mode;
+            
             if (currentMode === 'interpolation') {
                 loadTablesToSelect();
             }
-            // Recalcular con el modo actual
-            const temp = parseFloat(tempInput.value) || 25;
-            calculateForCurrentMode(temp, currentR25);
         });
     });
-    
-    // Inicializar con 10K seleccionado por defecto
-    setTimeout(() => {
-        const defaultBtn = document.querySelector('[data-r="10000"]');
-        if (defaultBtn) {
-            defaultBtn.click();
-        }
-    }, 100);
 }
-;
 
-    // Slider de temperatura
-    const slider = document.getElementById('temp-slider');
-    const tempInput = document.getElementById('input-temp');
+function updateCoefficientsForR25(R25) {
+    const T1 = 0, T2 = 25, T3 = 50;
+    const Beta = 3950;
+    const T25K = 298.15;
     
-    slider.addEventListener('input', () => {
-        tempInput.value = parseFloat(slider.value).toFixed(1);
-        calculateFromTemp();
-    });
-
-    tempInput.addEventListener('input', () => {
-        const val = parseFloat(tempInput.value);
-        if (!isNaN(val)) {
-            slider.value = val;
-            calculateFromTemp();
-        }
-    });
-
-    document.getElementById('input-res').addEventListener('input', calculateFromRes);
-
-    // Botón limpiar
-    document.getElementById('btn-clear').addEventListener('click', () => {
-        tempInput.value = '25.0';
-        slider.value = 25;
-        document.getElementById('input-res').value = '10.000';
-        hideAlert();
-    });
-
-    // Botón invertir
-    document.getElementById('btn-invert').addEventListener('click', () => {
-        const temp = tempInput.value;
-        const res = document.getElementById('input-res').value;
-        tempInput.value = res;
-        document.getElementById('input-res').value = temp;
-    });
-
-    // Selector de modo
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.calc-panel').forEach(p => p.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(btn.dataset.mode + '-panel').classList.add('active');
-            currentMode = btn.dataset.mode;
-            if (currentMode === 'interpolation') loadTablesToSelect();
-        });
-    });
+    const R1 = R25 * Math.exp(Beta * (1/(T1+273.15) - 1/T25K));
+    const R2 = R25;
+    const R3 = R25 * Math.exp(Beta * (1/(T3+273.15) - 1/T25K));
+    
+    const coeffs = calcEngine.calculateCoefficients(T1, R1, T2, R2, T3, R3);
+    
+    const inputA = document.getElementById('sh-a');
+    const inputB = document.getElementById('sh-b');
+    const inputC = document.getElementById('sh-c');
+    
+    if (inputA) inputA.value = coeffs.A.toExponential(6);
+    if (inputB) inputB.value = coeffs.B.toExponential(6);
+    if (inputC) inputC.value = coeffs.C.toExponential(6);
 }
 
 function calculateFromTemp() {
@@ -312,17 +361,26 @@ function calculateFromTemp() {
         const A = parseFloat(document.getElementById('sh-a').value);
         const B = parseFloat(document.getElementById('sh-b').value);
         const C = parseFloat(document.getElementById('sh-c').value);
+        
         const R = calcEngine.tempToRes(tC, A, B, C);
         document.getElementById('input-res').value = (R / 1000).toFixed(3);
     } else {
         const tableName = document.getElementById('lut-table-select').value;
-        if (!tableName) return;
+        if (!tableName) {
+            showAlert('Seleccione una tabla', 'error');
+            return;
+        }
+        
         getTable(tableName, (table) => {
-            const res = calcEngine.interpolate(tC, table.data, 'T_to_R');
-            if (res.error) {
-                showAlert(res.error, 'error');
+            if (!table) {
+                showAlert('Tabla no encontrada', 'error');
+                return;
+            }
+            const result = calcEngine.interpolate(tC, table.data, 'T_to_R');
+            if (result.error) {
+                showAlert(result.error, 'error');
             } else {
-                document.getElementById('input-res').value = (res.value / 1000).toFixed(3);
+                document.getElementById('input-res').value = (result.value / 1000).toFixed(3);
             }
         });
     }
@@ -332,25 +390,42 @@ function calculateFromRes() {
     const R_k = parseFloat(document.getElementById('input-res').value);
     hideAlert();
     if (isNaN(R_k)) return;
+    
     const R = R_k * 1000;
 
     if (currentMode === 'steinhart') {
         const A = parseFloat(document.getElementById('sh-a').value);
         const B = parseFloat(document.getElementById('sh-b').value);
         const C = parseFloat(document.getElementById('sh-c').value);
+        
         const tC = calcEngine.resToTemp(R, A, B, C);
         document.getElementById('input-temp').value = tC.toFixed(1);
-        document.getElementById('temp-slider').value = tC;
+        
+        const slider = document.getElementById('temp-slider');
+        if (slider && tC >= -40 && tC <= 150) {
+            slider.value = tC;
+        }
     } else {
         const tableName = document.getElementById('lut-table-select').value;
-        if (!tableName) return;
+        if (!tableName) {
+            showAlert('Seleccione una tabla', 'error');
+            return;
+        }
+        
         getTable(tableName, (table) => {
-            const res = calcEngine.interpolate(R, table.data, 'R_to_T');
-            if (res.error) {
-                showAlert(res.error, 'error');
+            if (!table) {
+                showAlert('Tabla no encontrada', 'error');
+                return;
+            }
+            const result = calcEngine.interpolate(R, table.data, 'R_to_T');
+            if (result.error) {
+                showAlert(result.error, 'error');
             } else {
-                document.getElementById('input-temp').value = res.value.toFixed(1);
-                document.getElementById('temp-slider').value = res.value;
+                document.getElementById('input-temp').value = result.value.toFixed(1);
+                const slider = document.getElementById('temp-slider');
+                if (slider && result.value >= -40 && result.value <= 150) {
+                    slider.value = result.value;
+                }
             }
         });
     }
@@ -369,107 +444,235 @@ function hideAlert() {
 }
 
 // ==========================================
-// 7. CLIENTES
+// 7. TABLAS
 // ==========================================
-function setupClients() {
-    document.getElementById('new-client-btn').addEventListener('click', () => {
-        currentEditingClientId = null;
-        clearClientForm();
+function loadTablesToSelect() {
+    return new Promise((resolve) => {
+        if (!db) {
+            resolve();
+            return;
+        }
+        
+        const select = document.getElementById('lut-table-select');
+        if (!select) {
+            resolve();
+            return;
+        }
+        
+        const tx = db.transaction(['tables'], 'readonly');
+        const store = tx.objectStore('tables');
+        const request = store.getAll();
+        
+        request.onsuccess = () => {
+            select.innerHTML = '<option value="">-- Seleccione una tabla --</option>';
+            
+            const tables = request.result;
+            tables.forEach(table => {
+                const option = document.createElement('option');
+                option.value = table.name;
+                option.textContent = table.name;
+                select.appendChild(option);
+            });
+            
+            if (tables.length > 0) {
+                select.value = tables[0].name;
+            }
+            
+            console.log(`📊 ${tables.length} tablas cargadas`);
+            resolve();
+        };
+        
+        request.onerror = () => {
+            console.error('Error al cargar tablas');
+            resolve();
+        };
     });
+}
 
-    document.getElementById('btn-save').addEventListener('click', saveClient);
-    document.getElementById('btn-delete').addEventListener('click', deleteCurrentClient);
+function getTable(name, callback) {
+    if (!db || !name) {
+        callback(null);
+        return;
+    }
+    
+    const tx = db.transaction(['tables'], 'readonly');
+    const store = tx.objectStore('tables');
+    const request = store.get(name);
+    
+    request.onsuccess = () => callback(request.result);
+    request.onerror = () => callback(null);
+}
 
-    // Toggle ON/OFF - INVERTER
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+function setupTables() {
+    const fileInput = document.getElementById('csv-upload');
+    if (!fileInput) return;
+    
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const lines = event.target.result.split('\n');
+            const data = [];
+            
+            lines.forEach(line => {
+                const parts = line.split(',').map(v => parseFloat(v.trim()));
+                if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                    data.push({ r: parts[0], t: parts[1] });
+                }
+            });
+            
+            if (data.length > 0) {
+                const tx = db.transaction(['tables'], 'readwrite');
+                const store = tx.objectStore('tables');
+                store.put({ name: file.name.replace('.csv', ''), data });
+                
+                tx.oncomplete = () => {
+                    alert('✅ Tabla importada correctamente');
+                    renderTables();
+                    loadTablesToSelect();
+                };
+            }
+        };
+        reader.readAsText(file);
+    });
+}
+
+function renderTables() {
+    if (!db) return;
+    
+    const tx = db.transaction(['tables'], 'readonly');
+    const store = tx.objectStore('tables');
+    const request = store.getAll();
+    
+    request.onsuccess = () => {
+        const container = document.getElementById('tables-list');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        const tables = request.result;
+        
+        tables.forEach(table => {
+            const div = document.createElement('div');
+            div.className = 'table-item';
+            div.innerHTML = `
+                <div class="table-info">
+                    <h3>${table.name}</h3>
+                    <p>Tabla completa -40°C a 150°C</p>
+                </div>
+                <button class="table-btn">›</button>
+            `;
+            container.appendChild(div);
+        });
+    };
+}
+
+// ==========================================
+// 8. CLIENTES
+// ==========================================
+let currentEditingClientId = null;
+
+function setupClients() {
+    const newClientBtn = document.getElementById('new-client-btn');
+    if (newClientBtn) {
+        newClientBtn.addEventListener('click', () => {
+            currentEditingClientId = null;
+            clearClientForm();
+        });
+    }
+
+    const saveBtn = document.getElementById('btn-save');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveClient);
+    }
+    
+    const deleteBtn = document.getElementById('btn-delete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', deleteCurrentClient);
+    }
+
+    const toggleBtns = document.querySelectorAll('.toggle-btn');
+    toggleBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            toggleBtns.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
         });
     });
 }
 
 function clearClientForm() {
-    document.getElementById('client-name').value = '';
-    document.getElementById('client-phone').value = '';
-    document.getElementById('client-email').value = '';
-    document.getElementById('equipment-name').value = '';
-    document.getElementById('client-note').value = '';
-    document.getElementById('therm-int-1').value = '10.0';
-    document.getElementById('therm-int-1-temp').value = '25.0';
-    document.getElementById('therm-int-2').value = '15.0';
-    document.getElementById('therm-int-2-temp').value = '20.0';
-    document.getElementById('therm-ext-1').value = '5.0';
-    document.getElementById('therm-ext-1-temp').value = '30.0';
-    document.getElementById('therm-ext-2').value = '10.0';
-    document.getElementById('therm-ext-2-temp').value = '28.0';
+    const fields = [
+        'client-name', 'client-phone', 'client-email',
+        'equipment-name', 'client-note'
+    ];
+    fields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    
+    const defaults = {
+        'therm-int-1': '10.0', 'therm-int-1-temp': '25.0',
+        'therm-int-2': '15.0', 'therm-int-2-temp': '20.0',
+        'therm-ext-1': '5.0', 'therm-ext-1-temp': '30.0',
+        'therm-ext-2': '10.0', 'therm-ext-2-temp': '28.0'
+    };
+    
+    Object.keys(defaults).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = defaults[id];
+    });
 }
 
 function saveClient() {
-    const name = document.getElementById('client-name').value.trim();
-    const phone = document.getElementById('client-phone').value.trim();
-    const email = document.getElementById('client-email').value.trim();
-    const equipment = document.getElementById('equipment-name').value.trim();
-    const note = document.getElementById('client-note').value.trim();
-    const equipmentType = document.querySelector('.toggle-btn.active')?.dataset.type || 'inverter';
+    const name = (document.getElementById('client-name').value || '').trim();
+    const phone = (document.getElementById('client-phone').value || '').trim();
+    const email = (document.getElementById('client-email').value || '').trim();
+    const equipment = (document.getElementById('equipment-name').value || '').trim();
+    const note = (document.getElementById('client-note').value || '').trim();
+    
+    const activeToggle = document.querySelector('.toggle-btn.active');
+    const equipmentType = activeToggle ? activeToggle.getAttribute('data-type') : 'inverter';
 
     if (!name || !phone) {
         alert('️ Nombre y Teléfono son obligatorios');
         return;
     }
 
-    // Verificar duplicados
-    const txCheck = db.transaction(['clients'], 'readonly');
-    const storeCheck = txCheck.objectStore('clients');
-    const checkReq = storeCheck.getAll();
-    
-    checkReq.onsuccess = () => {
-        const clients = checkReq.result;
-        const duplicate = clients.find(c => 
-            c.name.toLowerCase() === name.toLowerCase() && c.phone === phone && c.id !== currentEditingClientId
-        );
-        
-        if (duplicate) {
-            if (!confirm('⚠️ Ya existe un cliente con este Nombre y Teléfono. ¿Desea guardarlo de todas formas?')) {
-                return;
-            }
-        }
-
-        const clientData = {
-            name, phone, email, equipment, equipmentType, note,
-            thermistors: {
-                int1: { r: document.getElementById('therm-int-1').value, t: document.getElementById('therm-int-1-temp').value },
-                int2: { r: document.getElementById('therm-int-2').value, t: document.getElementById('therm-int-2-temp').value },
-                ext1: { r: document.getElementById('therm-ext-1').value, t: document.getElementById('therm-ext-1-temp').value },
-                ext2: { r: document.getElementById('therm-ext-2').value, t: document.getElementById('therm-ext-2-temp').value }
-            },
-            updatedAt: new Date().toISOString()
-        };
-
-        if (currentEditingClientId) {
-            clientData.id = currentEditingClientId;
-        } else {
-            clientData.createdAt = new Date().toISOString();
-        }
-
-        const tx = db.transaction(['clients'], 'readwrite');
-        tx.objectStore('clients').put(clientData);
-        tx.oncomplete = () => {
-            alert('✅ Cliente guardado correctamente');
-            clearClientForm();
-            currentEditingClientId = null;
-        };
-        tx.onerror = () => alert('❌ Error al guardar el cliente');
+    const clientData = {
+        name, phone, email, equipment, equipmentType, note,
+        thermistors: {
+            int1: { r: document.getElementById('therm-int-1').value, t: document.getElementById('therm-int-1-temp').value },
+            int2: { r: document.getElementById('therm-int-2').value, t: document.getElementById('therm-int-2-temp').value },
+            ext1: { r: document.getElementById('therm-ext-1').value, t: document.getElementById('therm-ext-1-temp').value },
+            ext2: { r: document.getElementById('therm-ext-2').value, t: document.getElementById('therm-ext-2-temp').value }
+        },
+        updatedAt: new Date().toISOString()
     };
+
+    if (currentEditingClientId) {
+        clientData.id = currentEditingClientId;
+    } else {
+        clientData.createdAt = new Date().toISOString();
+    }
+
+    const tx = db.transaction(['clients'], 'readwrite');
+    tx.objectStore('clients').put(clientData);
+    tx.oncomplete = () => {
+        alert('✅ Cliente guardado correctamente');
+        clearClientForm();
+        currentEditingClientId = null;
+    };
+    tx.onerror = () => alert('❌ Error al guardar');
 }
 
 function deleteCurrentClient() {
     if (!currentEditingClientId) {
-        alert('No hay cliente seleccionado para eliminar');
+        alert('ℹ️ No hay cliente seleccionado');
         return;
     }
     
-    if (confirm('⚠️ ¿Está seguro de eliminar este cliente? Esta acción no se puede deshacer.')) {
+    if (confirm('⚠️ ¿Está seguro de eliminar?')) {
         const tx = db.transaction(['clients'], 'readwrite');
         tx.objectStore('clients').delete(currentEditingClientId);
         tx.oncomplete = () => {
@@ -477,34 +680,38 @@ function deleteCurrentClient() {
             clearClientForm();
             currentEditingClientId = null;
         };
-        tx.onerror = () => alert('❌ Error al eliminar el cliente');
     }
 }
 
 // ==========================================
-// 8. BUSCADOR - Busca por nombre, apellido, teléfono o email
+// 9. BUSCADOR
 // ==========================================
 function setupSearch() {
     const searchInput = document.getElementById('global-search');
-    const resultsContainer = document.getElementById('search-results');
-
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase().trim();
+    if (!searchInput) return;
+    
+    searchInput.addEventListener('input', function() {
+        const query = this.value.toLowerCase().trim();
+        const resultsContainer = document.getElementById('search-results');
+        
+        if (!resultsContainer) return;
+        
         resultsContainer.innerHTML = '';
         
         if (query.length < 2) {
-            resultsContainer.innerHTML = '<p class="empty-state">Escribe al menos 2 caracteres para buscar</p>';
+            resultsContainer.innerHTML = '<p class="empty-state">Escribe al menos 2 caracteres</p>';
             return;
         }
 
         const tx = db.transaction(['clients'], 'readonly');
-        tx.objectStore('clients').getAll().onsuccess = (ev) => {
-            const matches = ev.target.result.filter(c => {
-                const nameMatch = c.name && c.name.toLowerCase().includes(query);
-                const phoneMatch = c.phone && c.phone.includes(query);
-                const emailMatch = c.email && c.email.toLowerCase().includes(query);
-                const equipmentMatch = c.equipment && c.equipment.toLowerCase().includes(query);
-                return nameMatch || phoneMatch || emailMatch || equipmentMatch;
+        const store = tx.objectStore('clients');
+        const request = store.getAll();
+        
+        request.onsuccess = () => {
+            const matches = request.result.filter(c => {
+                return (c.name && c.name.toLowerCase().includes(query)) || 
+                       (c.phone && c.phone.includes(query)) ||
+                       (c.email && c.email.toLowerCase().includes(query));
             });
 
             if (matches.length === 0) {
@@ -516,15 +723,13 @@ function setupSearch() {
                 const div = document.createElement('div');
                 div.className = 'result-item';
                 div.innerHTML = `
-                    <span class="result-icon">🔍</span>
+                    <span class="result-icon"></span>
                     <div class="result-info">
                         <strong>${c.name}</strong>
-                        <small>📞 ${c.phone} • ✉️ ${c.email || 'Sin email'} •  ${c.equipment || 'Sin equipo'}</small>
+                        <small>📞 ${c.phone} • ✉️ ${c.email || 'Sin email'}</small>
                     </div>
                 `;
-                div.addEventListener('click', () => {
-                    loadClientToForm(c);
-                });
+                div.addEventListener('click', () => loadClientToForm(c));
                 resultsContainer.appendChild(div);
             });
         };
@@ -532,128 +737,51 @@ function setupSearch() {
 }
 
 function loadClientToForm(client) {
-    // Guardar ID del cliente que se está editando
     currentEditingClientId = client.id;
     
-    // Cargar datos en el formulario de clientes
-    document.getElementById('client-name').value = client.name || '';
-    document.getElementById('client-phone').value = client.phone || '';
-    document.getElementById('client-email').value = client.email || '';
-    document.getElementById('equipment-name').value = client.equipment || '';
-    document.getElementById('client-note').value = client.note || '';
+    const fields = {
+        'client-name': client.name,
+        'client-phone': client.phone,
+        'client-email': client.email || '',
+        'equipment-name': client.equipment || '',
+        'client-note': client.note || ''
+    };
     
-    // Cargar tipo de equipo
+    Object.keys(fields).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = fields[id];
+    });
+    
     if (client.equipmentType) {
         document.querySelectorAll('.toggle-btn').forEach(btn => {
             btn.classList.remove('active');
-            if (btn.dataset.type === client.equipmentType) {
+            if (btn.getAttribute('data-type') === client.equipmentType) {
                 btn.classList.add('active');
             }
         });
     }
     
-    // Cargar termistores
     if (client.thermistors) {
-        document.getElementById('therm-int-1').value = client.thermistors.int1?.r || '0.0';
-        document.getElementById('therm-int-1-temp').value = client.thermistors.int1?.t || '0.0';
-        document.getElementById('therm-int-2').value = client.thermistors.int2?.r || '0.0';
-        document.getElementById('therm-int-2-temp').value = client.thermistors.int2?.t || '0.0';
-        document.getElementById('therm-ext-1').value = client.thermistors.ext1?.r || '0.0';
-        document.getElementById('therm-ext-1-temp').value = client.thermistors.ext1?.t || '0.0';
-        document.getElementById('therm-ext-2').value = client.thermistors.ext2?.r || '0.0';
-        document.getElementById('therm-ext-2-temp').value = client.thermistors.ext2?.t || '0.0';
+        const thermFields = {
+            'therm-int-1': client.thermistors.int1?.r,
+            'therm-int-1-temp': client.thermistors.int1?.t,
+            'therm-int-2': client.thermistors.int2?.r,
+            'therm-int-2-temp': client.thermistors.int2?.t,
+            'therm-ext-1': client.thermistors.ext1?.r,
+            'therm-ext-1-temp': client.thermistors.ext1?.t,
+            'therm-ext-2': client.thermistors.ext2?.r,
+            'therm-ext-2-temp': client.thermistors.ext2?.t
+        };
+        
+        Object.keys(thermFields).forEach(id => {
+            const el = document.getElementById(id);
+            if (el && thermFields[id]) el.value = thermFields[id];
+        });
     }
 
-    // Cambiar a vista de clientes
-    document.querySelector('[data-view="view-clientes"]').click();
+    const clientesBtn = document.querySelector('[data-view="view-clientes"]');
+    if (clientesBtn) clientesBtn.click();
     
-    // Limpiar búsqueda
-    document.getElementById('global-search').value = '';
-}
-
-// ==========================================
-// 9. TABLAS
-// ==========================================
-function setupTables() {
-    document.getElementById('csv-upload').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const lines = event.target.result.split('\n');
-            const data = [];
-            lines.forEach(line => {
-                const parts = line.split(',').map(v => parseFloat(v.trim()));
-                if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                    data.push({ r: parts[0], t: parts[1] });
-                }
-            });
-            if (data.length > 0) {
-                const tx = db.transaction(['tables'], 'readwrite');
-                tx.objectStore('tables').put({ name: file.name.replace('.csv', ''), data });
-                tx.oncomplete = () => {
-                    alert('✅ Tabla importada correctamente');
-                    renderTables();
-                    loadTablesToSelect();
-                };
-            }
-        };
-        reader.readAsText(file);
-    });
-
-    // Click en items de tabla
-    document.querySelectorAll('.table-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const name = item.querySelector('h3').textContent;
-            getTable(name, (table) => {
-                if (table) {
-                    alert(`📊 Tabla: ${table.name}\n📈 Puntos: ${table.data.length}\n️ Rango: ${table.data[0].t}°C a ${table.data[table.data.length-1].t}°C`);
-                }
-            });
-        });
-    });
-}
-
-function renderTables() {
-    const tx = db.transaction(['tables'], 'readonly');
-    tx.objectStore('tables').getAll().onsuccess = (e) => {
-        const container = document.getElementById('tables-list');
-        container.innerHTML = '';
-        e.target.result.forEach(t => {
-            const div = document.createElement('div');
-            div.className = 'table-item';
-            div.innerHTML = `
-                <div class="table-info">
-                    <h3>${t.name}</h3>
-                    <p>Tabla completa -40°C a 150°C</p>
-                </div>
-                <button class="table-btn">›</button>
-            `;
-            container.appendChild(div);
-        });
-    };
-}
-
-function loadTablesToSelect() {
-    const tx = db.transaction(['tables'], 'readonly');
-    tx.objectStore('tables').getAll().onsuccess = (e) => {
-        const select = document.getElementById('lut-table-select');
-        if (!select) return;
-        select.innerHTML = '<option value="">-- Seleccione una tabla --</option>';
-        e.target.result.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.name;
-            opt.textContent = t.name;
-            select.appendChild(opt);
-        });
-        if (e.target.result.length > 0) {
-            select.value = e.target.result[0].name;
-            currentTable = e.target.result[0];
-        }
-    };
-}
-
-function getTable(name, callback) {
-    const tx = db.transaction(['tables'], 'readonly');
-    tx.objectStore('tables').get(name).onsuccess = (e) => callback(e.target.result);
+    const searchInput = document.getElementById('global-search');
+    if (searchInput) searchInput.value = '';
 }
