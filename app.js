@@ -162,19 +162,98 @@ function setupTheme() {
 }
 
 // ==========================================
-// 6. CONVERSOR
+// 6. CONVERSOR - CORREGIDO
 // ==========================================
 function setupConverter() {
-    // Botones de acceso rápido
+    // Botones de acceso rápido (5K, 10K, 15K, 20K)
     document.querySelectorAll('.quick-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            const r = parseFloat(btn.dataset.r);
-            document.getElementById('input-res').value = (r / 1000).toFixed(3);
-            calculateFromRes();
+            
+            const rNominal = parseFloat(btn.dataset.r); // 5000, 10000, 15000, 20000
+            currentR25 = rNominal;
+            
+            // Establecer temperatura en 25°C
+            const tempInput = document.getElementById('input-temp');
+            const slider = document.getElementById('temp-slider');
+            tempInput.value = '25.0';
+            slider.value = 25;
+            
+            // Establecer resistencia en el valor nominal (en kΩ)
+            const resInput = document.getElementById('input-res');
+            resInput.value = (rNominal / 1000).toFixed(3);
+            
+            // Actualizar coeficientes Steinhart-Hart según el valor nominal
+            updateCoefficientsForR25(rNominal);
+            
+            hideAlert();
         });
     });
+
+    // Slider de temperatura
+    const slider = document.getElementById('temp-slider');
+    const tempInput = document.getElementById('input-temp');
+    
+    slider.addEventListener('input', () => {
+        const val = parseFloat(slider.value);
+        if (!isNaN(val)) {
+            tempInput.value = val.toFixed(1);
+            calculateFromTemp();
+        }
+    });
+
+    tempInput.addEventListener('input', () => {
+        const val = parseFloat(tempInput.value);
+        if (!isNaN(val)) {
+            // Actualizar slider solo si está en rango
+            if (val >= -40 && val <= 150) {
+                slider.value = val;
+            }
+            calculateFromTemp();
+        }
+    });
+
+    document.getElementById('input-res').addEventListener('input', calculateFromRes);
+
+    // Botón limpiar
+    document.getElementById('btn-clear').addEventListener('click', () => {
+        const tempInput = document.getElementById('input-temp');
+        const slider = document.getElementById('temp-slider');
+        const resInput = document.getElementById('input-res');
+        
+        tempInput.value = '25.0';
+        slider.value = 25;
+        resInput.value = (currentR25 / 1000).toFixed(3);
+        hideAlert();
+    });
+
+    // Selector de modo
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.calc-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.mode + '-panel').classList.add('active');
+            currentMode = btn.dataset.mode;
+            if (currentMode === 'interpolation') {
+                loadTablesToSelect();
+            }
+            // Recalcular con el modo actual
+            const temp = parseFloat(tempInput.value) || 25;
+            calculateForCurrentMode(temp, currentR25);
+        });
+    });
+    
+    // Inicializar con 10K seleccionado por defecto
+    setTimeout(() => {
+        const defaultBtn = document.querySelector('[data-r="10000"]');
+        if (defaultBtn) {
+            defaultBtn.click();
+        }
+    }, 100);
+}
+;
 
     // Slider de temperatura
     const slider = document.getElementById('temp-slider');
