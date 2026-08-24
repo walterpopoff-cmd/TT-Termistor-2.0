@@ -96,7 +96,6 @@ body {
     -webkit-text-fill-color: transparent;
     background-clip: text;
     letter-spacing: -2px;
-    text-shadow: 0 0 20px rgba(26, 115, 232, 0.3);
 }
 
 .app-header h1 {
@@ -138,8 +137,14 @@ body {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { 
+        opacity: 0; 
+        transform: translateY(10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
 }
 
 /* --- BOTONES DE ACCESO RÁPIDO (5K, 10K, 15K, 20K) --- */
@@ -286,10 +291,11 @@ body {
 
 /* --- BOTONES DE ACCIÓN --- */
 .action-buttons {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
     margin-bottom: 20px;
+}
+
+.action-buttons .btn-secondary {
+    width: 100%;
 }
 
 .btn-secondary, .btn-primary, .btn-danger, .btn-success, .btn-edit {
@@ -392,13 +398,19 @@ body {
     color: white;
 }
 
+.mode-btn:hover:not(.active) {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+/* --- PANELES DE CÁLCULO --- */
 .calc-panel {
     display: none;
+    animation: fadeIn 0.3s ease;
 }
 
 .calc-panel.active {
     display: block;
-    animation: fadeIn 0.3s;
 }
 
 .coefficients-grid {
@@ -823,6 +835,7 @@ body {
     background: var(--accent-blue-hover);
     transform: translateY(-2px);
 }
+
 /* --- BOTTOM NAV --- */
 .bottom-nav {
     position: fixed;
