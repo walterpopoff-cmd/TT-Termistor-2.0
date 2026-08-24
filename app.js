@@ -242,30 +242,62 @@ function setupTheme() {
 // 6. CONVERSOR - CORREGIDO
 // ==========================================
 function setupConverter() {
-    // Botones de acceso rápido
-    const quickBtns = document.querySelectorAll('.quick-btn');
-    quickBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            quickBtns.forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
+    // Botones de acceso rápido (5K, 10K, 15K, 20K)
+const quickBtns = document.querySelectorAll('.quick-btn');
+quickBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+        quickBtns.forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        
+        const rNominal = parseFloat(this.getAttribute('data-r'));
+        currentR25 = rNominal;
+        
+        const tempInput = document.getElementById('input-temp');
+        const slider = document.getElementById('temp-slider');
+        const resInput = document.getElementById('input-res');
+        
+        // Actualizar coeficientes Steinhart-Hart para el nuevo valor nominal
+        updateCoefficientsForR25(rNominal);
+        
+        // Si el usuario ingresó una temperatura manualmente, mantenerla
+        // y solo recalcular la resistencia correspondiente
+        const currentTemp = parseFloat(tempInput.value);
+        
+        if (!isNaN(currentTemp) && currentTemp >= -40 && currentTemp <= 150) {
+            // MANTENER la temperatura ingresada por el usuario
+            // Solo recalcular la resistencia para el nuevo tipo de termistor
+            if (currentMode === 'steinhart') {
+                const A = parseFloat(document.getElementById('sh-a').value);
+                const B = parseFloat(document.getElementById('sh-b').value);
+                const C = parseFloat(document.getElementById('sh-c').value);
+                const R = calcEngine.tempToRes(currentTemp, A, B, C);
+                resInput.value = (R / 1000).toFixed(3);
+            } else {
+                const tableName = document.getElementById('lut-table-select').value;
+                if (tableName) {
+                    getTable(tableName, (table) => {
+                        if (table) {
+                            const result = calcEngine.interpolate(currentTemp, table.data, 'T_to_R');
+                            if (!result.error) {
+                                resInput.value = (result.value / 1000).toFixed(3);
+                            }
+                        }
+                    });
+                }
+            }
             
-            const rNominal = parseFloat(this.getAttribute('data-r'));
-            currentR25 = rNominal;
-            
-            const tempInput = document.getElementById('input-temp');
-            const slider = document.getElementById('temp-slider');
-            const resInput = document.getElementById('input-res');
-            
+            console.log(`✅ Temperatura fija: ${currentTemp}°C → ${rNominal/1000}K = ${(resInput.value)} kΩ`);
+        } else {
+            // Si no hay temperatura válida, usar 25°C por defecto
             tempInput.value = '25.0';
             slider.value = 25;
             resInput.value = (rNominal / 1000).toFixed(3);
-            
-            updateCoefficientsForR25(rNominal);
-            hideAlert();
-            
-            console.log(`✅ Seleccionado: ${rNominal/1000}K @ 25°C`);
-        });
+        }
+        
+        hideAlert();
     });
+});
+
 
     // Slider
     const slider = document.getElementById('temp-slider');
