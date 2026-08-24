@@ -823,7 +823,6 @@ body {
     background: var(--accent-blue-hover);
     transform: translateY(-2px);
 }
-
 /* --- BOTTOM NAV --- */
 .bottom-nav {
     position: fixed;
@@ -853,23 +852,34 @@ body {
 }
 
 .nav-btn .nav-icon {
-    font-size: 22px;
-    margin-bottom: 2px;
+    width: 24px;
+    height: 24px;
+    margin-bottom: 4px;
+    fill: currentColor;
 }
 
 .nav-btn .nav-label {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 .nav-btn.active {
     color: var(--accent-red);
 }
 
+.nav-btn.active .nav-icon {
+    fill: var(--accent-red);
+}
+
 .nav-btn.active .nav-label {
     color: var(--accent-red);
+    font-weight: 700;
+}
+
+.nav-btn:hover:not(.active) {
+    color: var(--text-secondary);
 }
 
 /* --- MODAL --- */
