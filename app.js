@@ -1,11 +1,12 @@
 // ==========================================
 // TABLA DE TERMISTORES 2.0 - APP.JS
-// Motor completo: IndexedDB, Steinhart-Hart, Interpolación, Clientes
+// Motor completo: IndexedDB, Steinhart-Hart, Interpolación, Clientes, Buscador
 // ==========================================
 
 const DB_NAME = 'TermistoresDB';
 const DB_VERSION = 1;
 let db;
+let currentEditingClientId = null;
 
 // ==========================================
 // 1. INICIALIZACIÓN DE BASE DE DATOS
@@ -293,6 +294,7 @@ function hideAlert() {
 // ==========================================
 function setupClients() {
     document.getElementById('new-client-btn').addEventListener('click', () => {
+        currentEditingClientId = null;
         clearClientForm();
     });
 
@@ -333,38 +335,75 @@ function saveClient() {
     const equipmentType = document.querySelector('.toggle-btn.active')?.dataset.type || 'inverter';
 
     if (!name || !phone) {
-        alert('Nombre y Teléfono son obligatorios');
+        alert('️ Nombre y Teléfono son obligatorios');
         return;
     }
 
-    const clientData = {
-        name, phone, email, equipment, equipmentType, note,
-        thermistors: {
-            int1: { r: document.getElementById('therm-int-1').value, t: document.getElementById('therm-int-1-temp').value },
-            int2: { r: document.getElementById('therm-int-2').value, t: document.getElementById('therm-int-2-temp').value },
-            ext1: { r: document.getElementById('therm-ext-1').value, t: document.getElementById('therm-ext-1-temp').value },
-            ext2: { r: document.getElementById('therm-ext-2').value, t: document.getElementById('therm-ext-2-temp').value }
-        },
-        createdAt: new Date().toISOString()
-    };
+    // Verificar duplicados
+    const txCheck = db.transaction(['clients'], 'readonly');
+    const storeCheck = txCheck.objectStore('clients');
+    const checkReq = storeCheck.getAll();
+    
+    checkReq.onsuccess = () => {
+        const clients = checkReq.result;
+        const duplicate = clients.find(c => 
+            c.name.toLowerCase() === name.toLowerCase() && c.phone === phone && c.id !== currentEditingClientId
+        );
+        
+        if (duplicate) {
+            if (!confirm('⚠️ Ya existe un cliente con este Nombre y Teléfono. ¿Desea guardarlo de todas formas?')) {
+                return;
+            }
+        }
 
-    const tx = db.transaction(['clients'], 'readwrite');
-    tx.objectStore('clients').add(clientData);
-    tx.oncomplete = () => {
-        alert('✅ Cliente guardado correctamente');
-        clearClientForm();
+        const clientData = {
+            name, phone, email, equipment, equipmentType, note,
+            thermistors: {
+                int1: { r: document.getElementById('therm-int-1').value, t: document.getElementById('therm-int-1-temp').value },
+                int2: { r: document.getElementById('therm-int-2').value, t: document.getElementById('therm-int-2-temp').value },
+                ext1: { r: document.getElementById('therm-ext-1').value, t: document.getElementById('therm-ext-1-temp').value },
+                ext2: { r: document.getElementById('therm-ext-2').value, t: document.getElementById('therm-ext-2-temp').value }
+            },
+            updatedAt: new Date().toISOString()
+        };
+
+        if (currentEditingClientId) {
+            clientData.id = currentEditingClientId;
+        } else {
+            clientData.createdAt = new Date().toISOString();
+        }
+
+        const tx = db.transaction(['clients'], 'readwrite');
+        tx.objectStore('clients').put(clientData);
+        tx.oncomplete = () => {
+            alert('✅ Cliente guardado correctamente');
+            clearClientForm();
+            currentEditingClientId = null;
+        };
+        tx.onerror = () => alert('❌ Error al guardar el cliente');
     };
-    tx.onerror = () => alert('Error al guardar el cliente');
 }
 
 function deleteCurrentClient() {
-    if (confirm('¿Está seguro de eliminar este cliente? Esta acción no se puede deshacer.')) {
-        alert('Función de eliminación - implementar con ID de cliente');
+    if (!currentEditingClientId) {
+        alert('No hay cliente seleccionado para eliminar');
+        return;
+    }
+    
+    if (confirm('⚠️ ¿Está seguro de eliminar este cliente? Esta acción no se puede deshacer.')) {
+        const tx = db.transaction(['clients'], 'readwrite');
+        tx.objectStore('clients').delete(currentEditingClientId);
+        tx.oncomplete = () => {
+            alert('✅ Cliente eliminado');
+            clearClientForm();
+            currentEditingClientId = null;
+        };
+        tx.onerror = () => alert('❌ Error al eliminar el cliente');
     }
 }
 
 // ==========================================
-// 8. BUSCADOR
+// 8. BUSCADOR - Busca por nombre, apellido, teléfono o email
 // ==========================================
 function setupSearch() {
     const searchInput = document.getElementById('global-search');
@@ -374,15 +413,20 @@ function setupSearch() {
         const query = e.target.value.toLowerCase().trim();
         resultsContainer.innerHTML = '';
         
-        if (query.length < 2) return;
+        if (query.length < 2) {
+            resultsContainer.innerHTML = '<p class="empty-state">Escribe al menos 2 caracteres para buscar</p>';
+            return;
+        }
 
         const tx = db.transaction(['clients'], 'readonly');
         tx.objectStore('clients').getAll().onsuccess = (ev) => {
-            const matches = ev.target.result.filter(c => 
-                c.name.toLowerCase().includes(query) || 
-                c.phone.includes(query) ||
-                (c.equipment && c.equipment.toLowerCase().includes(query))
-            );
+            const matches = ev.target.result.filter(c => {
+                const nameMatch = c.name && c.name.toLowerCase().includes(query);
+                const phoneMatch = c.phone && c.phone.includes(query);
+                const emailMatch = c.email && c.email.toLowerCase().includes(query);
+                const equipmentMatch = c.equipment && c.equipment.toLowerCase().includes(query);
+                return nameMatch || phoneMatch || emailMatch || equipmentMatch;
+            });
 
             if (matches.length === 0) {
                 resultsContainer.innerHTML = '<p class="empty-state">No se encontraron resultados</p>';
@@ -396,10 +440,12 @@ function setupSearch() {
                     <span class="result-icon">🔍</span>
                     <div class="result-info">
                         <strong>${c.name}</strong>
-                        <small>${c.phone} • ${c.equipment || 'Sin equipo'}</small>
+                        <small>📞 ${c.phone} • ✉️ ${c.email || 'Sin email'} •  ${c.equipment || 'Sin equipo'}</small>
                     </div>
                 `;
-                div.addEventListener('click', () => loadClientToForm(c));
+                div.addEventListener('click', () => {
+                    loadClientToForm(c);
+                });
                 resultsContainer.appendChild(div);
             });
         };
@@ -407,12 +453,27 @@ function setupSearch() {
 }
 
 function loadClientToForm(client) {
+    // Guardar ID del cliente que se está editando
+    currentEditingClientId = client.id;
+    
+    // Cargar datos en el formulario de clientes
     document.getElementById('client-name').value = client.name || '';
     document.getElementById('client-phone').value = client.phone || '';
     document.getElementById('client-email').value = client.email || '';
     document.getElementById('equipment-name').value = client.equipment || '';
     document.getElementById('client-note').value = client.note || '';
     
+    // Cargar tipo de equipo
+    if (client.equipmentType) {
+        document.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.dataset.type === client.equipmentType) {
+                btn.classList.add('active');
+            }
+        });
+    }
+    
+    // Cargar termistores
     if (client.thermistors) {
         document.getElementById('therm-int-1').value = client.thermistors.int1?.r || '0.0';
         document.getElementById('therm-int-1-temp').value = client.thermistors.int1?.t || '0.0';
@@ -426,6 +487,9 @@ function loadClientToForm(client) {
 
     // Cambiar a vista de clientes
     document.querySelector('[data-view="view-clientes"]').click();
+    
+    // Limpiar búsqueda
+    document.getElementById('global-search').value = '';
 }
 
 // ==========================================
@@ -464,7 +528,7 @@ function setupTables() {
             const name = item.querySelector('h3').textContent;
             getTable(name, (table) => {
                 if (table) {
-                    alert(`Tabla: ${table.name}\nPuntos: ${table.data.length}\nRango: ${table.data[0].t}°C a ${table.data[table.data.length-1].t}°C`);
+                    alert(`📊 Tabla: ${table.name}\n📈 Puntos: ${table.data.length}\n️ Rango: ${table.data[0].t}°C a ${table.data[table.data.length-1].t}°C`);
                 }
             });
         });
