@@ -162,7 +162,7 @@ function setupTheme() {
 }
 
 // ==========================================
-// 6. CONVERSOR - CORREGIDO
+// 6. CONVERSOR
 // ==========================================
 function setupConverter() {
     // Botones de acceso rápido (5K, 10K, 15K, 20K)
