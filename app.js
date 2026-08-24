@@ -313,23 +313,54 @@ function setupConverter() {
         });
     }
 
-    // Selector de modo
-    const modeBtns = document.querySelectorAll('.mode-btn');
-    modeBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            modeBtns.forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.calc-panel').forEach(p => p.classList.remove('active'));
-            
-            this.classList.add('active');
-            const mode = this.getAttribute('data-mode');
-            document.getElementById(mode + '-panel').classList.add('active');
-            currentMode = mode;
-            
-            if (currentMode === 'interpolation') {
-                loadTablesToSelect();
-            }
+   // Selector de modo
+const modeBtns = document.querySelectorAll('.mode-btn');
+modeBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+        // Remover active de todos los botones
+        modeBtns.forEach(b => b.classList.remove('active'));
+        
+        // Ocultar todos los paneles
+        document.querySelectorAll('.calc-panel').forEach(p => {
+            p.classList.remove('active');
+            p.style.display = 'none';
         });
+        
+        // Activar botón actual
+        this.classList.add('active');
+        
+        // Obtener modo
+        const mode = this.getAttribute('data-mode');
+        currentMode = mode;
+        
+        // Mostrar panel correspondiente
+        const panelId = mode + '-panel';
+        const panel = document.getElementById(panelId);
+        if (panel) {
+            panel.classList.add('active');
+            panel.style.display = 'block';
+        }
+        
+        console.log(`🔄 Modo cambiado a: ${mode}`);
+        
+        // Cargar tablas si es modo interpolación
+        if (currentMode === 'interpolation') {
+            loadTablesToSelect().then(() => {
+                // Recalcular con el valor actual de temperatura
+                const currentTemp = parseFloat(document.getElementById('input-temp').value);
+                if (!isNaN(currentTemp)) {
+                    calculateFromTemp();
+                }
+            });
+        } else {
+            // Modo Steinhart-Hart - recalcular
+            const currentTemp = parseFloat(document.getElementById('input-temp').value);
+            if (!isNaN(currentTemp)) {
+                calculateFromTemp();
+            }
+        }
     });
+});
 }
 
 function updateCoefficientsForR25(R25) {
